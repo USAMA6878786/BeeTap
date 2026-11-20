@@ -110,7 +110,7 @@ public class SettingsActivity extends Activity {
         LinearLayout tileLeft = new LinearLayout(this);
         tileLeft.setOrientation(LinearLayout.VERTICAL);
         tileLeft.addView(Ui.rowTitle(this, "控制中心磁贴"));
-        tileLeft.addView(Ui.caption(this, "收起面板 → 由 BeeTap 截屏并派发识别"));
+        tileLeft.addView(Ui.caption(this, "收起面板 → 截屏 → 派发识别"));
         tileRow.addView(tileLeft, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         tileRow.addView(Ui.filledButton(this, "添加", new View.OnClickListener() {
@@ -120,15 +120,15 @@ public class SettingsActivity extends Activity {
             }
         }));
         tileCard.addView(tileRow);
-        tileCard.addView(Ui.caption(this, "截屏走 root 直接抓帧，约 0.25 秒"),
-                Ui.lp(-1, -2, 0, 6, 0, 0));
+        // 原来这里还有一行「截屏走 root 直接抓帧，约 0.25 秒」：和「使用说明」里那句重复，
+        // 而且让这张卡出现"标题 + 说明 + 再说明"的三层文字，删掉只留一行副标题。
 
         // ---------------- 功能开关 ----------------
         // 「常驻运行」不再作为开关暴露：模块默认常驻（见下方 KeepAliveService.start），
         // 用户没必要为"点磁贴要不要快 0.3 秒"做一次选择。
         LinearLayout behaviorCard = Ui.card(this, root, "功能开关");
 
-        Ui.switchRow(this, behaviorCard, "识别后删除截图", "读完由 BeeTap 清理相册，不留残骸",
+        Ui.switchRow(this, behaviorCard, "识别后删除截图", "读完由 BeeTap 清理",
                 Prefs.autoDelete(this), new Ui.OnToggle() {
                     @Override
                     public void onToggle(boolean on) {
@@ -157,7 +157,7 @@ public class SettingsActivity extends Activity {
         // 打开时自动跑一次真抓帧 + 真压缩的自检（抓不到屏/压不动都会直说），
         // 跑通之后每张截图都先压再交出去。关掉就完全按原图。
         Ui.switchRow(this, behaviorCard, "图片压缩",
-                "截图先压成 JPEG 再由 BeeTap 上传识别，更快也更省流量",
+                "上传前压成 JPEG，更快",
                 Prefs.compress(this), new Ui.OnToggle() {
                     @Override
                     public void onToggle(boolean on) {
@@ -172,7 +172,7 @@ public class SettingsActivity extends Activity {
         // 接管 AI 识别：模块在本地架代理，代替蜜蜂记账去访问 AI。
         // 关掉就停掉代理 —— 宿主侧的钩子只探测端口通不通，探测不到就回到直连（旧行为）。
         Ui.switchRow(this, behaviorCard, "接管 AI 识别",
-                "由 BeeTap 代发 AI 请求，避开蜜蜂记账被冻结导致的「识别失败」",
+                "由 BeeTap 代发请求",
                 Prefs.aiTakeover(this), new Ui.OnToggle() {
                     @Override
                     public void onToggle(boolean on) {

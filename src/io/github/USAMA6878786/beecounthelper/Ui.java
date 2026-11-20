@@ -196,15 +196,24 @@ final class Ui {
     static void switchRow(Context c, LinearLayout parent, String title, String subtitle,
                           boolean checked, OnToggle l) {
         LinearLayout row = row(c);
+        // 上下 10dp：副标题压成一行后不需要那么松，整块更紧凑好扫。
+        int v = dp(c, 10);
+        row.setPadding(0, v, 0, v);
 
         LinearLayout left = new LinearLayout(c);
         left.setOrientation(LinearLayout.VERTICAL);
         left.addView(rowTitle(c, title));
         if (subtitle != null && subtitle.length() > 0) {
-            left.addView(caption(c, subtitle));
+            TextView sub = caption(c, subtitle);
+            // 强制单行：副标题只是标题的补充说明，折成两行就会和标题抢视觉重量。
+            // 文案本身已压到 10 字上下（细节在「使用说明」里），这里留省略号兜底。
+            sub.setMaxLines(1);
+            sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            left.addView(sub, lp(-1, -2, 0, dp(c, 2), 0, 0));
         }
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        llp.rightMargin = dp(c, 12);
         row.addView(left, llp);
 
         Toggle sw = new Toggle(c);
