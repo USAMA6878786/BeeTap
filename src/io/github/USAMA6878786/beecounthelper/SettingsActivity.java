@@ -110,7 +110,7 @@ public class SettingsActivity extends Activity {
         LinearLayout tileLeft = new LinearLayout(this);
         tileLeft.setOrientation(LinearLayout.VERTICAL);
         tileLeft.addView(Ui.rowTitle(this, "控制中心磁贴"));
-        tileLeft.addView(Ui.caption(this, "收起面板 → 截屏 → 交给蜜蜂记账"));
+        tileLeft.addView(Ui.caption(this, "收起面板 → 由 BeeTap 截屏并派发识别"));
         tileRow.addView(tileLeft, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         tileRow.addView(Ui.filledButton(this, "添加", new View.OnClickListener() {
@@ -128,7 +128,7 @@ public class SettingsActivity extends Activity {
         // 用户没必要为"点磁贴要不要快 0.3 秒"做一次选择。
         LinearLayout behaviorCard = Ui.card(this, root, "功能开关");
 
-        Ui.switchRow(this, behaviorCard, "识别后删除截图", "蜜蜂记账读完就清理相册",
+        Ui.switchRow(this, behaviorCard, "识别后删除截图", "读完由 BeeTap 清理相册，不留残骸",
                 Prefs.autoDelete(this), new Ui.OnToggle() {
                     @Override
                     public void onToggle(boolean on) {
@@ -157,7 +157,7 @@ public class SettingsActivity extends Activity {
         // 打开时自动跑一次真抓帧 + 真压缩的自检（抓不到屏/压不动都会直说），
         // 跑通之后每张截图都先压再交出去。关掉就完全按原图。
         Ui.switchRow(this, behaviorCard, "图片压缩",
-                "截图先压成 JPEG 再交给蜜蜂记账，上传识别更快",
+                "截图先压成 JPEG 再由 BeeTap 上传识别，更快也更省流量",
                 Prefs.compress(this), new Ui.OnToggle() {
                     @Override
                     public void onToggle(boolean on) {
@@ -314,8 +314,9 @@ public class SettingsActivity extends Activity {
             + "• 建议把蜜蜂记账的省电策略设为「无限制」：不设也能用（AI 请求由 BeeTap 代发），"
             + "只是排队时会多等几次系统解冻\n\n"
             + "截屏只有一条路：root 直接抓帧（约 0.25 秒）；抓帧失败才退回 root 注入按键。\n\n"
-            + "整个过程：收起面板 → 等 0.1 秒 → 截屏 → 弹「截图成功」→ BeeTap 代发 AI 请求 → "
-            + "蜜蜂记账解析并落库 → 删图。\n\n"
+            + "分工：截屏、派发、AI 请求、删图都由 BeeTap 完成；蜜蜂记账只负责把图解析成账单写进账本。\n\n"
+            + "整个过程：收起面板 → 等 0.1 秒 → BeeTap 截屏 → 弹「截图成功」→ BeeTap 派发并代发 AI 请求 → "
+            + "蜜蜂记账解析落库 → BeeTap 删图。\n\n"
             + "从点击到删图实测约 4~7 秒，大头在 AI 识别（3~5 秒）；连点时会排队，逐个处理。";
 
     @Override
