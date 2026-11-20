@@ -220,12 +220,6 @@ public class SettingsActivity extends Activity {
                 showText("使用说明", GUIDE);
             }
         });
-        Ui.listItem(this, helpCard, "常见问题", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showText("常见问题", FAQ);
-            }
-        });
         Ui.listItem(this, helpCard, "检查更新", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -324,26 +318,6 @@ public class SettingsActivity extends Activity {
             + "蜜蜂记账解析并落库 → 删图。\n\n"
             + "从点击到删图实测约 4~7 秒，大头在 AI 识别（3~5 秒）；连点时会排队，逐个处理。";
 
-    /** 常见问题。 */
-    private static final String FAQ =
-            "点了磁贴没反应？\n"
-            + "① 点「root 权限」看是否已授权；② 有没有看到「截图成功 / 失败」的提示"
-            + "（没给通知权限时这个提示会被系统吞掉，去系统设置里给「BeeTap」打开通知即可）；"
-            + "③ 蜜蜂记账的「截图自动记账」是否开着（进「智能记账」确认）。\n\n"
-            + "提示「识别失败」？\n"
-            + "识别请求现在是 BeeTap 代发的（不是蜜蜂记账自己发），所以系统冻结它不会再掐断连接。"
-            + "还失败通常是这几种：① AI Key 失效或额度用尽；② 手机没有网络、或代理把请求挡了；"
-            + "③ 这张截图里确实没有账单（会显示「未识别到账单」）。\n"
-            + "想确认是不是代理的问题：把「接管 AI 识别」关掉再点一次，它就会回到蜜蜂记账直连 AI。\n\n"
-            + "改了配置不生效？\n"
-            + "hook 只在蜜蜂记账启动时注入，点「重启蜜蜂记账」。\n\n"
-            + "小部件数字不更新？\n"
-            + "数字是从蜜蜂记账的账本里读的。它没在跑时，模块会自己把它拉起来再取一次"
-            + "（无界面、只拉进程），一般几秒内就更新；拉不起来才显示上一次的值。\n\n"
-            + "要打开蜜蜂记账才能记账吗？\n"
-            + "不用。点磁贴时模块会自己把它的进程拉起来、起一个无界面引擎把截图送进去识别，"
-            + "全程不显示它的界面、也不会把它弹到前台。";
-
     @Override
     protected void onResume() {
         super.onResume();
@@ -387,7 +361,7 @@ public class SettingsActivity extends Activity {
                 }
                 probing = false;
                 // 还在重启窗口里又没答复 -> 过一会儿自己再来一次。
-                // 不弹任何提示：排障步骤都写在「使用说明 / 常见问题」里了。
+                // 不弹任何提示：排障步骤都写在「使用说明」里了。
                 if (!hostAnswered && System.currentTimeMillis() < restartingUntil) {
                     new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
                         @Override
