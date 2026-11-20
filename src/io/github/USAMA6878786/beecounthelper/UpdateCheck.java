@@ -83,20 +83,72 @@ final class UpdateCheck {
         return BuildInfo.VERSION_NAME;
     }
 
-    /** 拉一次远端版本信息。**阻塞**，调用方放子线程。 */
+    /**
+     * 拉一次远端版本信息。**阻塞**，调用方放子线程。
+     *
+     * <p>三个源（raw / jsDelivr / Releases API）**同时并发**，谁先成功用谁。
+     * 实机踩坑：raw 和 jsDelivr 都被墙（Connection reset），只有 api.github.com 通
+     * （Clash 路由差异）；串行等 JSON 超时再走 API 就是 7 秒起步。
+     * 三路并发后，总耗时 ≈ 最快那条（实测 API ~1 秒）。
+     */
     static Info fetch() {
-        Info json = tryJson();
-        if (json.ok) {
-            return json;
+        long t0 = System.currentTimeMillis();
+        final java.util.concurrent.atomic.AtomicReference<Info> ok =
+                new java.util.concurrent.atomic.AtomicReference<Info>(null);
+        final java.util.concurrent.atomic.AtomicReference<String> lastErr =
+                new java.util.concurrent.atomic.AtomicReference<String>("所有源都不可达");
+        final java.util.concurrent.CountDownLatch firstOk =
+                new java.util.concurrent.CountDownLatch(1);
+
+        // JSON 路（内部再并发 raw + jsDelivr）
+        Thread jt = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Info info = tryJson();
+                if (info.ok) {
+                    ok.compareAndSet(null, info);
+                    firstOk.countDown();
+                } else {
+                    lastErr.set(info.error);
+                }
+            }
+        }, "bee-update-json");
+        jt.setDaemon(true);
+
+        // API 路
+        Thread at = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Info info = tryApi();
+                if (info.ok) {
+                    ok.compareAndSet(null, info);
+                    firstOk.countDown();
+                } else {
+                    lastErr.set(info.error);
+                }
+            }
+        }, "bee-update-api");
+        at.setDaemon(true);
+
+        jt.start();
+        at.start();
+
+        try {
+            firstOk.await(JSON_RACE_MS + TIMEOUT_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
-        Logx.w("[update] update.json 失败：" + json.error + "，改用 Releases API");
-        Info api = tryApi();
-        if (api.ok) {
-            return api;
+
+        Info found = ok.get();
+        if (found != null) {
+            Logx.i("[update] 完成 用时 " + (System.currentTimeMillis() - t0)
+                    + "ms（" + found.source + "）");
+            return found;
         }
-        // 两条都失败时，优先报 update.json 的原因（它才是权威来源）
-        return new Info(false, null, null, null,
-                json.error != null ? json.error : api.error, "none");
+        Logx.w("[update] 全部失败 用时 " + (System.currentTimeMillis() - t0)
+                + "ms：" + lastErr.get());
+        return new Info(false, null, null, null, lastErr.get(), "none");
     }
 
     private static Info tryApi() {
@@ -133,6 +185,9 @@ final class UpdateCheck {
                 new java.util.concurrent.atomic.AtomicReference<String>("没有可用的 update.json 地址");
         final java.util.concurrent.CountDownLatch done =
                 new java.util.concurrent.CountDownLatch(JSON_URLS.length);
+        // 第一个成功就放行，不必等另一条（可能正在黑洞超时）
+        final java.util.concurrent.CountDownLatch firstOk =
+                new java.util.concurrent.CountDownLatch(1);
 
         for (int i = 0; i < JSON_URLS.length; i++) {
             final String url = JSON_URLS[i];
@@ -157,6 +212,7 @@ final class UpdateCheck {
                                 + " apk=" + apk);
                         ok.set(new Info(true, normalize(tag), apk, null, null,
                                 "json（" + hostOf(url) + "）"));
+                        firstOk.countDown();
                     } catch (Throwable t2) {
                         lastErr.set(shortMsg(t2));
                         Logx.w("[update] " + hostOf(url) + "：" + lastErr.get());
@@ -169,8 +225,9 @@ final class UpdateCheck {
             t.start();
         }
 
+        // 等第一个成功；都没有就等到两条都结束（或超时），再判失败
         try {
-            done.await(JSON_RACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            firstOk.await(JSON_RACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
