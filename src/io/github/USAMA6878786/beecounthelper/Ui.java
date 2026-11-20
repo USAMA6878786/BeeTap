@@ -32,38 +32,36 @@ final class Ui {
 
     // ---------------- 色彩令牌（M3 语义命名） ----------------
 
-    /** 页面底色：暖白纸感，比纯白柔和（避免大面积 #FFF 的刺眼）。 */
-    static final int BACKGROUND = Color.parseColor("#FBFAF7");
-    /** 卡片底色：纯白，让卡片自己"浮"在暖白页面上。 */
-    static final int SURFACE_CONTAINER = Color.parseColor("#FFFFFF");
-    /** 发丝描边：白卡在浅底上单靠投影会糊，加 1px 描边更利落。 */
-    static final int OUTLINE = Color.parseColor("#EDE6DC");
-    /** 主色（primary）：蜂蜜琥珀，压深一点以提高白底上的对比度。 */
+    /** 页面底色（surface）。 */
+    static final int BACKGROUND = Color.parseColor("#FFFBFF");
+    /** 卡片底色（surfaceContainer）。 */
+    static final int SURFACE_CONTAINER = Color.parseColor("#F7F0E8");
+    /** 主色（primary）。 */
     static final int PRIMARY = Color.parseColor("#8A5100");
     static final int ON_PRIMARY = Color.WHITE;
     /** 主色容器（primaryContainer），用于 tonal 按钮与高亮块。 */
-    static final int PRIMARY_CONTAINER = Color.parseColor("#FBEBD6");
-    static final int ON_PRIMARY_CONTAINER = Color.parseColor("#4A2A00");
+    static final int PRIMARY_CONTAINER = Color.parseColor("#FFDDB8");
+    static final int ON_PRIMARY_CONTAINER = Color.parseColor("#2B1700");
     /** 主要文字。 */
-    static final int ON_SURFACE = Color.parseColor("#1B1917");
+    static final int ON_SURFACE = Color.parseColor("#1D1B16");
     /** 次要文字。 */
-    static final int ON_SURFACE_VARIANT = Color.parseColor("#6B6055");
+    static final int ON_SURFACE_VARIANT = Color.parseColor("#514539");
     /** 未选中态的描边/轨道。 */
-    static final int OUTLINE_VARIANT = Color.parseColor("#D8CEC1");
+    static final int OUTLINE_VARIANT = Color.parseColor("#D5C3B2");
     // ---------------- 尺寸令牌（M3 常用档位） ----------------
 
     /** 页面左右留白。 */
-    static final int PAGE_PAD = 18;
+    static final int PAGE_PAD = 16;
     /** 卡片内留白。 */
-    static final int CARD_PAD = 18;
+    static final int CARD_PAD = 16;
     /** 卡片之间。 */
-    static final int CARD_GAP = 14;
+    static final int CARD_GAP = 12;
     /** 卡片圆角（M3 medium 形状）。 */
     static final int CARD_RADIUS = 20;
-    /** 按钮圆角（Apple 风格，比卡片略小才有"可点"的暗示）。 */
-    static final int BUTTON_RADIUS = 14;
-    /** 按钮最小高度（Apple HIG 44 + 2 呼吸）。 */
-    static final int BUTTON_HEIGHT = 46;
+    /** 按钮圆角（M3 full 形状，40dp 高时取 20）。 */
+    static final int BUTTON_RADIUS = 20;
+    /** 按钮最小高度（M3 触控目标）。 */
+    static final int BUTTON_HEIGHT = 44;
 
     // ---------------- 基础换算 ----------------
 
@@ -82,51 +80,28 @@ final class Ui {
         return d;
     }
 
-    /** 圆角 + 发丝描边（白卡靠它和背景分开）。 */
-    static GradientDrawable roundedStroke(int color, int radiusDp, int stroke, Context c) {
-        GradientDrawable d = rounded(color, radiusDp, c);
-        d.setStroke(Math.max(1, dp(c, 0.7f)), stroke);
-        return d;
-    }
-
-    // ---------------- 字体 ----------------
-
-    /** 中等字重（系统自带，不引入字体文件）。 */
-    static android.graphics.Typeface medium() {
-        return android.graphics.Typeface.create("sans-serif-medium",
-                android.graphics.Typeface.NORMAL);
-    }
-
     // ---------------- 容器 ----------------
 
     /**
-     * 一张卡片：白底 + 发丝描边 + 1dp 投影，返回**内容容器**（往里 addView）。
-     *
-     * <p>为什么白卡而不是填充色块：暖白页面上再铺浅驼色卡片，明度差太小、
-     * 整页会糊成一片；换成白卡 + 1px 描边 + 极轻投影，层级一眼就出来了，
-     * 也更接近现在主流 App 的观感（M3 filled 卡在深色底上才好看）。
+     * 一张卡片：圆角 + 内留白，返回**内容容器**（往里 addView）。
      *
      * @param title 卡片标题，null 表示不要标题
      */
     static LinearLayout card(Context c, LinearLayout parent, String title) {
         LinearLayout outer = new LinearLayout(c);
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setBackground(roundedStroke(SURFACE_CONTAINER, CARD_RADIUS, OUTLINE, c));
+        outer.setBackground(rounded(SURFACE_CONTAINER, CARD_RADIUS, c));
         int p = dp(c, CARD_PAD);
         outer.setPadding(p, p, p, p);
-        // 极轻投影（1.5dp）：给白卡一点"离开纸面"的感觉，不做重阴影。
-        outer.setElevation(dp(c, 1.5f));
-        outer.setClipToPadding(false);
 
         if (title != null && title.length() > 0) {
             TextView t = new TextView(c);
             t.setText(title);
-            t.setTextSize(12f);
-            t.setTypeface(medium());
+            t.setTextSize(13f);
             t.setTextColor(ON_SURFACE_VARIANT);
-            t.setLetterSpacing(0.08f);
+            t.setLetterSpacing(0.06f);
             t.setAllCaps(false);
-            outer.addView(t, lp(-2, -2, 0, 0, 0, 12));
+            outer.addView(t, lp(-2, -2, 0, 0, 0, 10));
         }
 
         parent.addView(outer, lp(-1, -2, 0, CARD_GAP, 0, 0));
@@ -144,14 +119,13 @@ final class Ui {
 
     // ---------------- 文本 ----------------
 
-    /** 页面大标题（26sp，负字距让大字更紧凑有质感）。 */
+    /** 页面大标题。 */
     static TextView title(Context c, String text) {
         TextView t = new TextView(c);
         t.setText(text);
-        t.setTextSize(26f);
-        t.setTypeface(medium());
+        t.setTextSize(22f);
         t.setTextColor(ON_SURFACE);
-        t.setLetterSpacing(-0.02f);
+        t.setLetterSpacing(-0.01f);
         return t;
     }
 
@@ -161,16 +135,15 @@ final class Ui {
         t.setText(text);
         t.setTextSize(12.5f);
         t.setTextColor(ON_SURFACE_VARIANT);
-        t.setLineSpacing(dp(c, 3), 1f);
+        t.setLineSpacing(dp(c, 2), 1f);
         return t;
     }
 
-    /** 行标题（15sp + 中等字重，比正文略"半拍"重，层级靠字重区分）。 */
+    /** 行标题。 */
     static TextView rowTitle(Context c, String text) {
         TextView t = new TextView(c);
         t.setText(text);
-        t.setTextSize(15f);
-        t.setTypeface(medium());
+        t.setTextSize(14.5f);
         t.setTextColor(ON_SURFACE);
         return t;
     }
@@ -194,12 +167,11 @@ final class Ui {
     private static TextView pillText(Context c, String text, int textColor, int bg) {
         TextView b = new TextView(c);
         b.setText(text);
-        b.setTextSize(14.5f);
-        b.setTypeface(medium());
+        b.setTextSize(14f);
         b.setTextColor(textColor);
         b.setGravity(Gravity.CENTER);
         b.setMinHeight(dp(c, BUTTON_HEIGHT));
-        b.setPadding(dp(c, 20), dp(c, 12), dp(c, 20), dp(c, 12));
+        b.setPadding(dp(c, 20), dp(c, 10), dp(c, 20), dp(c, 10));
         b.setClickable(true);
         b.setFocusable(true);
         if (bg == Color.TRANSPARENT) {
@@ -224,20 +196,15 @@ final class Ui {
     static void switchRow(Context c, LinearLayout parent, String title, String subtitle,
                           boolean checked, OnToggle l) {
         LinearLayout row = row(c);
-        // 上下各留 12dp：多行开关之间靠留白分组，不画分隔线（M3 的做法）。
-        int v = dp(c, 12);
-        row.setPadding(0, v, 0, v);
 
         LinearLayout left = new LinearLayout(c);
         left.setOrientation(LinearLayout.VERTICAL);
         left.addView(rowTitle(c, title));
         if (subtitle != null && subtitle.length() > 0) {
-            TextView sub = caption(c, subtitle);
-            left.addView(sub, lp(-1, -2, 0, dp(c, 3), 0, 0));
+            left.addView(caption(c, subtitle));
         }
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        llp.rightMargin = dp(c, 16);
         row.addView(left, llp);
 
         Toggle sw = new Toggle(c);
@@ -258,26 +225,22 @@ final class Ui {
         LinearLayout row = new LinearLayout(c);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(dp(c, 52));
-        int v = dp(c, 8);
-        row.setPadding(0, v, 0, v);
+        row.setMinimumHeight(dp(c, 48));
         row.setClickable(true);
         row.setFocusable(true);
         row.setBackground(new RippleDrawable(ColorStateList.valueOf(0x148A5100), null, null));
 
         TextView t = new TextView(c);
         t.setText(title);
-        t.setTextSize(15f);
-        t.setTypeface(medium());
+        t.setTextSize(14.5f);
         t.setTextColor(ON_SURFACE);
         row.addView(t, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView chev = new TextView(c);
         chev.setText("›");
-        chev.setTextSize(17f);
+        chev.setTextSize(18f);
         chev.setTextColor(ON_SURFACE_VARIANT);
-        chev.setIncludeFontPadding(false);
         row.addView(chev);
 
         row.setOnClickListener(l);
@@ -330,14 +293,6 @@ final class Ui {
         private final int knobD;
         boolean checked;
         OnToggle listener;
-        /** 0 = 关，1 = 开。用动画驱动，别让圆点"瞬移"。 */
-        private float anim = 0f;
-        private boolean animInit = false;
-        private android.animation.ValueAnimator va;
-        private final int colorOff = OUTLINE_VARIANT;
-        private final int colorOn = PRIMARY;
-        private final int knobOff = Color.parseColor("#FFFFFF");
-        private final int knobOn = ON_PRIMARY;
 
         Toggle(Context c) {
             super(c);
@@ -355,58 +310,19 @@ final class Ui {
 
         @Override
         protected void onDraw(Canvas canvas) {
-            if (!animInit) {
-                animInit = true;
-                anim = checked ? 1f : 0f;
-            }
             float r = trackH / 2f;
-            // 轨道颜色在关/开之间插值，和圆点一起动，观感是"整体切换"而不是两块分别跳。
-            int track = blend(colorOff, colorOn, anim);
-            paint.setColor(track);
+            paint.setColor(checked ? PRIMARY : OUTLINE_VARIANT);
             canvas.drawRoundRect(0, 0, trackW, trackH, r, r, paint);
 
-            float cx = r + (trackW - 2 * r) * anim;
-            paint.setColor(blend(knobOff, knobOn, anim));
-            // 圆点带一点柔和阴影，看起来有厚度（M3 的 state layer 观感）。
-            paint.setShadowLayer(dp(getContext(), 1.2f), 0, dp(getContext(), 0.8f), 0x33000000);
-            setLayerType(LAYER_TYPE_SOFTWARE, paint);
+            float cx = checked ? trackW - r : r;
+            paint.setColor(checked ? ON_PRIMARY : Color.parseColor("#FFFFFF"));
             canvas.drawCircle(cx, trackH / 2f, knobD / 2f, paint);
-            paint.clearShadowLayer();
-        }
-
-        /** 线性插值两个 ARGB 颜色。 */
-        private static int blend(int from, int to, float t) {
-            float u = Math.max(0f, Math.min(1f, t));
-            int a = (int) (Color.alpha(from) + (Color.alpha(to) - Color.alpha(from)) * u);
-            int r = (int) (Color.red(from) + (Color.red(to) - Color.red(from)) * u);
-            int g = (int) (Color.green(from) + (Color.green(to) - Color.green(from)) * u);
-            int b = (int) (Color.blue(from) + (Color.blue(to) - Color.blue(from)) * u);
-            return Color.argb(a, r, g, b);
-        }
-
-        /** 从当前值动画到目标状态（150ms，减速曲线）。 */
-        private void animateTo(float target) {
-            if (va != null) {
-                va.cancel();
-            }
-            va = android.animation.ValueAnimator.ofFloat(anim, target);
-            va.setDuration(150L);
-            va.setInterpolator(new android.view.animation.DecelerateInterpolator());
-            va.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
-                @Override
-                public void onAnimationUpdate(android.animation.ValueAnimator a) {
-                    anim = (Float) a.getAnimatedValue();
-                    invalidate();
-                }
-            });
-            va.start();
         }
 
         @Override
         public boolean performClick() {
             checked = !checked;
-            animInit = true;
-            animateTo(checked ? 1f : 0f);
+            invalidate();
             if (listener != null) {
                 listener.onToggle(checked);
             }
