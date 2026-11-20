@@ -118,6 +118,7 @@ public class BeeShotModule extends XposedModule {
             installActivityLifecycleProbe(cl);
             installEngineCapture(cl);
             installDartLogTap(cl);
+            installAiTakeover(cl);
 
             String summary = "ok=" + installed + " failed=" + failedList;
             Logx.i("[module] install summary: " + summary);
@@ -440,6 +441,76 @@ public class BeeShotModule extends XposedModule {
 
 
 
+    // ---------------------------------------------------------------- AI 接管
+
+    /**
+     * 劫持宿主的 SharedPreferences 读取，把「视觉能力」指向模块的本地 AI 代理
+     * （见 {@link AiTakeover}）。
+     *
+     * <p>挂两个方法：
+     * <ul>
+     *   <li>{@code getAll()} —— **主路径**。Flutter 的 shared_preferences 在 Dart 侧启动时
+     *       一次性把整张表读走，只挂单键读取是拦不到的。</li>
+     *   <li>{@code getString(String,String)} —— 兜底。宿主后续单独读某个键时也改。</li>
+     * </ul>
+     *
+     * <p>目标类是框架的 {@code android.app.SharedPreferencesImpl}（@hide）。LSPosed 会给
+     * 被钩进程放开隐藏 API 限制；万一这儿拿不到，日志会明确写出来，不会静默失效。
+     */
+    private void installAiTakeover(ClassLoader cl) {
+        Class<?> spi = null;
+        try {
+            spi = Class.forName("android.app.SharedPreferencesImpl");
+        } catch (Throwable t) {
+            Logx.w("[ai-hook] SharedPreferencesImpl 不可达：" + t.getMessage());
+        }
+        if (spi == null) {
+            failedList.add("ai-prefs:class-not-found");
+            return;
+        }
+
+        Method getAll = findMethod(spi, "getAll", new Class<?>[0]);
+        add("ai-prefs-getAll", getAll, new XposedInterface.Hooker() {
+            @Override
+            public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                Object result = chain.proceed();
+                try {
+                    if (result instanceof java.util.Map) {
+                        java.util.Map<String, Object> rewritten =
+                                AiTakeover.rewriteAll((java.util.Map<?, ?>) result);
+                        if (rewritten != null) {
+                            return rewritten;
+                        }
+                    }
+                } catch (Throwable t) {
+                    Logx.w("[ai-hook] getAll 改写异常：" + t.getMessage());
+                }
+                return result;
+            }
+        });
+
+        Method getString = findMethod(spi, "getString",
+                new Class<?>[]{String.class, String.class});
+        add("ai-prefs-getString", getString, new XposedInterface.Hooker() {
+            @Override
+            public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                Object result = chain.proceed();
+                try {
+                    String key = (String) chain.getArg(0);
+                    if (result instanceof String) {
+                        String rewritten = AiTakeover.rewriteOne(key, (String) result);
+                        if (rewritten != null) {
+                            return rewritten;
+                        }
+                    }
+                } catch (Throwable t) {
+                    Logx.w("[ai-hook] getString 改写异常：" + t.getMessage());
+                }
+                return result;
+            }
+        });
+    }
+
     // ---------------------------------------------------------------- Dart 日志截流
 
     /**
@@ -495,9 +566,18 @@ public class BeeShotModule extends XposedModule {
         try {
             android.content.IntentFilter f =
                     new android.content.IntentFilter(Const.ACTION_HEADLESS);
+            f.addAction(Const.ACTION_AI_MODE);
             android.content.BroadcastReceiver r = new android.content.BroadcastReceiver() {
                 @Override
                 public void onReceive(Context c, android.content.Intent intent) {
+                    // AI 接管开关：模块 App 起来代理之后会告诉我们"可以接管了"。
+                    if (intent != null && Const.ACTION_AI_MODE.equals(intent.getAction())) {
+                        AiTakeover.setEnabled(
+                                intent.getBooleanExtra(Const.EXTRA_AI_ENABLED, true));
+                        Logx.i("[ai-hook] 收到开关广播：enabled="
+                                + intent.getBooleanExtra(Const.EXTRA_AI_ENABLED, true));
+                        return;
+                    }
                     try {
                         // 纯 headless 模式：界面引擎在也照样起我们自己的引擎。
                         // 闸门已经按 messenger 把"宿主观察者的派发"全拦了，

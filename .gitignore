@@ -1,5 +1,6 @@
 # 构建中间产物
 build/
+release/
 build_out.txt
 
 # 本地工具链（JDK / Android SDK，不进仓库）
@@ -13,7 +14,10 @@ Thumbs.db
 
 # 打包出来的 APK 走 GitHub Releases 分发，仓库里只保留源码
 # （如果你想直接把 APK 提交进仓库，去掉下一行即可）
+# 打包出来的 APK。v4.0 起改为**随仓库分发**（update.json 用 raw 链接），
+# 所以放行根目录下的 BeeTap-v*.apk；中间产物 release/ 里的仍然忽略。
 *.apk
+!BeeTap-v*.apk
 *.idsig
 
 # ⚠️ 签名密钥只保留在本地，绝不进仓库

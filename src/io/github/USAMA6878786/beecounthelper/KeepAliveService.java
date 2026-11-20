@@ -14,7 +14,7 @@ import android.os.IBinder;
 /**
  * 常驻服务：让模块进程不被系统回收。
  *
- * <p><b>为什么需要它。</b>「BeeCountHelper」磁贴的服务跑在模块 App 的进程里，而这个进程闲置时
+ * <p><b>为什么需要它。</b>「BeeTap」磁贴的服务跑在模块 App 的进程里，而这个进程闲置时
  * 会被系统回收，于是点磁贴要先付一次进程冷启动（发生在我们的第一行日志之前，
  * 用户能直接感觉到：手指离开屏幕后要等一会儿才有反应）。
  *
@@ -67,7 +67,7 @@ public class KeepAliveService extends Service {
             }
             NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "常驻运行",
                     NotificationManager.IMPORTANCE_MIN);
-            ch.setDescription("让「BeeCountHelper」随时保持响应（点磁贴不再冷启动）。"
+            ch.setDescription("让「BeeTap」随时保持响应（点磁贴不再冷启动）。"
                     + "设为「静默」后状态栏不会有图标。");
             ch.setShowBadge(false);
             ch.setSound(null, null);
@@ -175,7 +175,7 @@ public class KeepAliveService extends Service {
             b = new Notification.Builder(this);
         }
         b.setSmallIcon(R.drawable.ic_tile_shot);
-        b.setContentTitle("BeeCountHelper");
+        b.setContentTitle("BeeTap");
         b.setContentText("常驻中：点磁贴立刻响应");
         b.setOngoing(true);
         b.setShowWhen(false);

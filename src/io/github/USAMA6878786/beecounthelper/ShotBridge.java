@@ -63,6 +63,35 @@ final class ShotBridge {
 
     private static volatile boolean receiverReady = false;
 
+    /**
+     * 最近「宿主确认已处理」的截图路径（派发补发用它提前收工）。
+     *
+     * <p>为什么是集合而不是单个字段：连点时会同时有 10 条补发线程在跑，
+     * 每张图处理完的时间不同。只记「最后一个」的话，先完成的那几条线程
+     * 永远匹配不上，会白跑满 20 秒窗口（实测 10 次点击留下 7 条「补发已满」日志）。
+     */
+    private static final java.util.Set<String> PROCESSED_PATHS =
+            java.util.Collections.newSetFromMap(
+                    new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+
+    /** 只留最近这些条，防止无限增长。 */
+    private static final int PROCESSED_CAP = 64;
+
+    /** 这张图宿主是否已经明确处理过（含"识别完了但没记成账"）。 */
+    static boolean isProcessed(String path) {
+        return path != null && path.length() > 0 && PROCESSED_PATHS.contains(path);
+    }
+
+    private static void markProcessed(String path) {
+        if (path == null || path.length() == 0) {
+            return;
+        }
+        if (PROCESSED_PATHS.size() > PROCESSED_CAP) {
+            PROCESSED_PATHS.clear();
+        }
+        PROCESSED_PATHS.add(path);
+    }
+
     static void ensureReceiver(Context ctx) {
         if (receiverReady || ctx == null) {
             return;
@@ -108,6 +137,9 @@ final class ShotBridge {
                             Logx.i("[bus] host telemetry: " + a.telemetry);
                         }
                         (a.decisive ? PUSH_QUEUE : REPLY_QUEUE).offer(a);
+                        if (a.processed) {
+                            markProcessed(a.path);
+                        }
 
                         // 宿主只说"识别完了、没删"（它现在不碰 root）——由模块立刻删。
                         // 走独立线程：删文件是 su 阻塞调用，不能压在主线程上。

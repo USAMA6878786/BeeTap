@@ -7,8 +7,8 @@
 # 产物固定输出到 release/ 目录。
 set -e
 
-VERSION_NAME="3.5"
-VERSION_CODE="108"
+VERSION_NAME="4.0"
+VERSION_CODE="110"
 
 # 脚本自己定位自己 —— 这个仓库可能被放在任何地方，**不要把本机路径写进脚本**。
 # （以前这里写死了绝对路径，等于把本机的目录结构一起提交进了仓库。）
@@ -35,7 +35,7 @@ ANDROID_JAR="$SDK/platforms/android-35/android.jar"
 LIBXPOSED="$TC/libxposed/classes.jar"
 
 OUT="$PROJ/build"
-APK="$PROJ/release/BeeCountHelper-v${VERSION_NAME}.apk"
+APK="$PROJ/release/BeeTap-v${VERSION_NAME}.apk"
 # 打 dex / 打包资源的小脚本需要一个 python：优先 $PYTHON，其次 PATH 里的 python3 / python。
 if [ -n "$PYTHON" ]; then
   PY="$PYTHON"

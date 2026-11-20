@@ -189,6 +189,31 @@ public final class Prefs {
         }
     }
 
+    /**
+     * 是否由模块「接管」与 AI 的网络交互（方案 A，默认**开**）。
+     *
+     * <p>实现上不是靠一个开关变量，而是靠**代理进程在不在**：
+     * 开着 → 磁贴点击时起 {@link AiProxy}；关掉 → 停掉它。
+     * 宿主侧的钩子只探测「端口通不通」，通就改写配置、不通就走它自己那条老路。
+     * 这样两个进程不需要共享任何状态，也不怕谁被冻结。
+     */
+    public static boolean aiTakeover(Context c) {
+        try {
+            return c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+                    .getBoolean(Const.PREF_AI_TAKEOVER, true);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    public static void setAiTakeover(Context c, boolean v) {
+        try {
+            c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+                    .edit().putBoolean(Const.PREF_AI_TAKEOVER, v).apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** 模块 App 进程的日志文件（私有目录，再由设置页导出）。 */
     public static String appLogPath(Context c) {
         try {

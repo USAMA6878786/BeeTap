@@ -29,6 +29,24 @@ final class HostLauncher {
     /** 3 秒内只试一次（只挡住同一次点击里的重复调用）。 */
     private static final long DEBOUNCE_MS = 3_000L;
 
+    /**
+     * 派发补发的总时长。
+     *
+     * <p>必须覆盖「宿主进程被回收 → 点磁贴 → 进程重新起来」这段空档
+     * （本机实测约 7 秒，慢的机型更久）。原来只有 2.1 秒，连点时前几张全丢。
+     */
+    /**
+     * 派发补发的总时长。**统一 20 秒，不要按"进程在不在"分档**。
+     *
+     * <p>必须覆盖「宿主进程被回收 → 点磁贴 → 进程重新起来」这段空档
+     * （本机实测约 7 秒，慢的机型更久）。原来只有 2.1 秒，连点时前几张全丢。
+     *
+     * <p>也试过「进程在 → 只补发 6 秒」省开销，<b>实测否掉</b>：那一轮 10 张里有一张
+     * 从未被派发 —— 进程当时在，但随后被冻结/回收，6 秒后补发就停了，没人再叫醒它。
+     * 同一路径重发对宿主是幂等的（按 DISPATCHED_HISTORY 去重），宁可多发包也别丢图。
+     */
+    private static final long DISPATCH_RETRY_MS = 20_000L;
+
     private static volatile long lastTryAt = 0L;
 
     private HostLauncher() {
@@ -133,8 +151,11 @@ final class HostLauncher {
             // 尽早把可能已被冻结的进程解冻，让紧接着的广播更容易送达。
             // 自适应校准（异步、只跑一次）：按本机实测的冻结周期算出该 sleep 多久，
             // 不同 ROM/机型的冻结周期可能不是 5 秒，硬编码会失效。
-            calibrateAsync(ctx, pkg);
-            startThawLoop(ctx, pkg);
+            //
+            // 2026-11-20 起默认关闭：AI 网络等待已搬到模块进程，宿主不再有长连接；
+            // 「让广播更容易送达」这件事由下面的 20 秒补发 + 每 4 秒 pullUp 兜住，
+            // 而这条循环每次都要挂一个 26 秒的 root shell。见 Const.ENABLE_THAW_LOOP。
+            ensureThaw(ctx, pkg);
 
             // 用 root 的 am broadcast 发派发请求：普通 sendBroadcast 在被冻结的
             //    宿主上投不到（动态接收器虽在，但进程冻结着收不到），root 的 shell
@@ -149,25 +170,70 @@ final class HostLauncher {
                     Intent.FLAG_RECEIVER_FOREGROUND | Const.FLAG_RECEIVER_INCLUDE_BACKGROUND);
             Logx.i("[launch] 已请求无界面派发" + (path != null ? "（指定路径）" : ""));
 
-            // 补发三次：广播若正好落在约 0.2 秒的冻结窗口里，会被 Greezer Denial 拒掉
-            // （实测连点时约 1/3 的派发被拒）。同一张图重发是安全的——宿主按路径去重
-            // （DISPATCHED_HISTORY / 队列 contains），重复不会重复记账。
+            // 补发窗口 **20 秒**（原来 3 次 ×700ms ≈ 2.1 秒）。
+            //
+            // 为什么必须这么长（2026-11-20 实测）：宿主被系统回收后再点磁贴，
+            // 从广播到「进程真的起来、接收器注册好」要 **约 7 秒**。原来那 2 秒
+            // 窗口全部落在进程还没起来的空档里，广播直接丢掉 —— 连点 10 次丢了 2 张，
+            // 表现就是「点了没记账」，而且要等 75 秒清理器超时才删图。
+            //
+            // 同一张图重发是安全的：宿主按路径去重（DISPATCHED_HISTORY / 队列 contains），
+            // 重复不会重复记账。收到宿主回执说这张 processed 就提前收工。
             final String fpkg = pkg;
             final String fextras = extras.toString();
+            final String fpath = path;
+            final android.content.Context appCtx =
+                    ctx.getApplicationContext() == null ? ctx : ctx.getApplicationContext();
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    for (int i = 1; i <= 3; i++) {
+                    final long window = DISPATCH_RETRY_MS;
+                    final long deadline = System.currentTimeMillis() + window;
+                    long lastPullUpAt = System.currentTimeMillis();
+                    int n = 0;
+                    while (System.currentTimeMillis() < deadline) {
                         try {
-                            Thread.sleep(700L);
+                            Thread.sleep(n < 6 ? 700L : 1_300L);
                         } catch (InterruptedException e) {
                             return;
                         }
-                        RootShell.broadcast(Const.ACTION_HEADLESS, fpkg, fextras,
-                                Intent.FLAG_RECEIVER_FOREGROUND
-                                        | Const.FLAG_RECEIVER_INCLUDE_BACKGROUND);
-                        Logx.i("[launch] 补发派发请求 #" + i);
+                        if (ShotBridge.isProcessed(fpath)) {
+                            Logx.i("[launch] 宿主已确认处理这张，停止补发（共 " + n + " 次）");
+                            return;
+                        }
+                        // 每 4 秒重新拉一次：进程若已被回收，只有"拉起"才能让它重新存在，
+                        // 光发广播唤不醒一个不存在的进程。
+                        if (System.currentTimeMillis() - lastPullUpAt >= 4_000L) {
+                            lastPullUpAt = System.currentTimeMillis();
+                            try {
+                                pullUp(appCtx);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                        n++;
+                        // 每 5 次走一次 root 广播（能穿冻结/后台限制，但每次都要起一个 su 进程，
+                        // 连点时开销不能忽视）；其余用普通广播，进程活着时一样能到。
+                        if (n % 5 == 1) {
+                            RootShell.broadcast(Const.ACTION_HEADLESS, fpkg, fextras,
+                                    Intent.FLAG_RECEIVER_FOREGROUND
+                                            | Const.FLAG_RECEIVER_INCLUDE_BACKGROUND);
+                        } else if (appCtx != null) {
+                            try {
+                                Intent it = new Intent(Const.ACTION_HEADLESS);
+                                it.setPackage(fpkg);
+                                it.putExtra(Const.EXTRA_AUTO_DELETE, Prefs.autoDelete(appCtx));
+                                if (fpath != null && fpath.length() > 0) {
+                                    it.putExtra(Const.EXTRA_PATH, fpath);
+                                }
+                                it.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+                                appCtx.sendBroadcast(it);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                        Logx.i("[launch] 补发派发请求 #" + n);
                     }
+                    Logx.w("[launch] 派发补发已满 " + (window / 1000) + " 秒，停止"
+                            + (fpath == null ? "" : "：" + fpath.substring(fpath.lastIndexOf('/') + 1)));
                 }
             }, "bee-dispatch-retry").start();
         } catch (Throwable t) {
@@ -325,7 +391,14 @@ final class HostLauncher {
         return v.get(v.size() / 2);
     }
 
-    /** 一次循环戳几下（5 下 ≈ 26 秒，覆盖一次识别的整个周期还有余量）。 */
+    /**
+     * 一次循环戳几下。
+     *
+     * <p><b>不能砍（2026-11-20 踩过）</b>：从 10 降到 6（≈16 秒）后，连点 10 张的排队要跑
+     * 约 50 秒，循环一结束宿主就重新冻死、没人再戳它 —— 那一轮只完成了 3 张，其余被清理器
+     * 按超时删掉。所以这个值要按"最长排队时长"给足余量，10 下（≈26 秒）× 每次派发重启一条，
+     * 才能把整段队列罩住。
+     */
     private static final int ALIGN_TICKS = 10;
 
     /** 只有一条对齐循环（连点时复用，避免两条相位互踩）。 */
@@ -342,6 +415,25 @@ final class HostLauncher {
      * <p>必须跑在**模块自己的进程**里（本类就是）：宿主被冻结时它内部所有线程一起被冻，
      * 在宿主里起的解冻线程自己也发不出 binder（实测只戳 1 次就停）。
      */
+    /**
+     * 确保解冻保活循环在跑（幂等）。
+     *
+     * <p><b>派发期间必须有人一直在戳宿主</b>：MIUI 冻结后台进程后只有外部 binder 触碰
+     * 才会解冻，光发广播只能让它短暂醒一下，Flutter 引擎会卡在"排队等派发"上跑不完。
+     * 实测关掉这条循环时，10 张连点只有 0 张能记账。
+     */
+    static void ensureThaw(Context ctx, String pkg) {
+        if (!Const.ENABLE_THAW_LOOP) {
+            return;
+        }
+        try {
+            calibrateAsync(ctx, pkg);
+            startThawLoop(ctx, pkg);
+        } catch (Throwable t) {
+            Logx.w("[launch] 起解冻循环失败：" + t.getMessage());
+        }
+    }
+
     private static void startThawLoop(final Context ctx, final String pkg) {
         if (thawLoopRunning) {
             return;
@@ -353,7 +445,7 @@ final class HostLauncher {
         // 尽快解冻；周期越接近冻结间隔，戳越可能命中冻结态）。
         // 循环内每轮实测本次戳耗时 d，用 T−d 当 sleep，让周期恒定、抖动被吸收。
         final long target = freezeIntervalMs + 150L;
-        String cmd = "timeout " + (ALIGN_TICKS * 8) + " sh -c 'for i in $(seq 1 "
+        String cmd = "timeout " + (ALIGN_TICKS * 5) + " sh -c 'for i in $(seq 1 "
                 + ALIGN_TICKS + "); do "
                 + "a=$(date +%s%3N); "
                 + "content query --uri " + uri + " >/dev/null 2>&1; "

@@ -59,6 +59,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
+        接管 AI 交互后，模块要替宿主把「视觉识别」那次请求扛下来（6~10 秒）。
+        这段时间必须保持 CPU 醒着，否则深度睡眠里 socket 会停摆。
+        只在一次请求期间持有，超时自动释放（见 AiProxy#acquire）。
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!--
         必须声明。模块 targetSdk 35，受 Android 11+ 的包可见性过滤约束：不声明的话
         getLaunchIntentForPackage("com.tntlikely.beecount") 一定返回 null，
         表现就是"打开蜜蜂记账"提示找不到应用。

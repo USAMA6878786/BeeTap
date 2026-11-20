@@ -41,7 +41,7 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setTitle("BeeCountHelper");
+        setTitle("BeeTap");
         Logx.init(Prefs.appLogPath(this));
         Logx.i("[settings] opened, module " + versionName());
 
@@ -57,7 +57,7 @@ public class SettingsActivity extends Activity {
         setContentView(scroll);
 
         // ---------------- 标题 ----------------
-        root.addView(Ui.title(this, "BeeCountHelper"), Ui.lp(-1, -2, 0, 4, 0, 2));
+        root.addView(Ui.title(this, "BeeTap"), Ui.lp(-1, -2, 0, 4, 0, 2));
         root.addView(Ui.caption(this, "v" + versionName() + " · 点磁贴才记账"),
                 Ui.lp(-1, -2, 0, 0, 0, 14));
 
@@ -311,7 +311,7 @@ public class SettingsActivity extends Activity {
     private static final String FAQ =
             "点了磁贴没反应？\n"
             + "① 点「root 权限」看是否已授权；② 有没有看到「截图成功 / 失败」的提示"
-            + "（没给通知权限时这个提示会被系统吞掉，去系统设置里给「BeeCountHelper」打开通知即可）；"
+            + "（没给通知权限时这个提示会被系统吞掉，去系统设置里给「BeeTap」打开通知即可）；"
             + "③ 蜜蜂记账的「截图自动记账」是否开着（进「智能记账」确认）。\n\n"
             + "提示「识别失败」？\n"
             + "根因是系统每 5 秒左右冻结一次后台的蜜蜂记账，冻结瞬间掐断它到 AI 的连接（网络报错）。"
@@ -464,7 +464,7 @@ public class SettingsActivity extends Activity {
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this)
                 .setTitle("还没拿到 root")
                 .setMessage("请打开「" + mgr + "」，在「超级用户 / 权限」列表里找到"
-                        + "「BeeCountHelper」并允许。\n\n"
+                        + "「BeeTap」并允许。\n\n"
                         + "有些管理器（KernelSU / APatch）在这种情况下不弹窗，"
                         + "只在通知栏提示一句，或者需要你自己去列表里加。\n\n"
                         + "授权完回到这里点一次「root 权限」即可重新检测。")
@@ -729,7 +729,7 @@ public class SettingsActivity extends Activity {
                             }
                         }
                     };
-            sbm.requestAddTileService(tile, "BeeCountHelper",
+            sbm.requestAddTileService(tile, "BeeTap",
                     Icon.createWithResource(this, android.R.drawable.ic_menu_camera),
                     executor, callback);
 
@@ -999,7 +999,7 @@ public class SettingsActivity extends Activity {
                 .setMessage("没有它，点磁贴之后「截图成功 / 截图失败」的提示会被系统吞掉，"
                         + "看起来就像点了没反应。\n\n"
                         + "截图和记账本身不受影响。想要提示的话，"
-                        + "在系统设置里把「BeeCountHelper」的通知打开即可。")
+                        + "在系统设置里把「BeeTap」的通知打开即可。")
                 .setPositiveButton("去打开", new android.content.DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(android.content.DialogInterface d, int which) {

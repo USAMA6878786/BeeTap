@@ -154,6 +154,52 @@ public final class Const {
      */
     public static final String EXTRA_WIDGET_COUNT = "widget_count";
 
+    // ---------------------------------------------------------------- AI 代理（接管视觉链路）
+
+    /**
+     * 本地 AI 代理监听的端口。
+     *
+     * <p>这个常量被**编译进两个进程**：模块 App 用它 bind（{@link AiProxy}），
+     * 宿主进程的钩子用它拼 baseUrl（{@link AiTakeover}）。两边必须一致，
+     * 所以只能写死——不能"运行时协商"，那两个进程没法互相读数据。
+     *
+     * <p>选一个高位端口，避开常被占用的 8080/1080 之类。
+     */
+    public static final int AI_PROXY_PORT = 46321;
+
+    /** 宿主的 AI 服务商列表（Flutter shared_preferences 的键）。 */
+    public static final String K_AI_PROVIDERS = "flutter.ai_providers_v2";
+
+    /** 宿主的「能力 → 服务商」绑定。 */
+    public static final String K_AI_BINDING = "flutter.ai_capability_binding_v2";
+
+    /** 模块 App -> 宿主进程：开/关「接管视觉链路」。 */
+    public static final String ACTION_AI_MODE = "io.github.USAMA6878786.beecounthelper.AI_MODE";
+
+    /** 广播里携带的开关值。 */
+    public static final String EXTRA_AI_ENABLED = "ai_enabled";
+
+    /** 模块 App 自己记的"接管"开关（默认开：装了模块就是想用它）。 */
+    public static final String PREF_AI_TAKEOVER = "ai_takeover";
+
+    /**
+     * 是否启用「binder 续命 / 对齐解冻」循环。**必须开**。
+     *
+     * <p>2026-11-20 做过一次 A/B，结论是关掉它直接把功能打死：
+     * <pre>
+     *   开：10 次连点 → 10 张全部派发并记账
+     *   关：10 次连点 → 10 张全部排队、0 张记账（宿主进程停在 do_freezer_trap）
+     * </pre>
+     *
+     * <p>原因：MIUI 的 GreezeManager 把后台进程冻住之后，**只有外部 binder 触碰才会解冻**，
+     * 广播能让它短暂醒一下，但不足以让 Flutter 引擎把活干完。所以哪怕接管 AI 之后
+     * 引擎只剩几百毫秒的活（解析 + 落库），也得有人在旁边一直戳它。
+     *
+     * <p>它原本要保的「6~10 秒 AI 长连接」确实已经搬到模块进程了，但这条循环现在
+     * 保的是「引擎能跑完」本身 —— 这不是优化项，是前提。
+     */
+    public static final boolean ENABLE_THAW_LOOP = true;
+
     /** 统一日志 TAG。 */
     public static final String TAG = "BeeShot";
 

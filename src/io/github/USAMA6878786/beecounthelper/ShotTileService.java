@@ -165,6 +165,22 @@ public class ShotTileService extends TileService {
         KeepAliveService.ensureChannel(app);   // 幂等、一次进程只做一次
         KeepAliveService.start(app);
 
+        // ---- 接管 AI 交互（方案 A）----
+        // 在截图之前就把本地代理拉起来：宿主的视觉请求随后会打到它身上，
+        // 由本进程（前台服务，不会被当后台应用冻结）去访问真·AI。
+        // 关掉开关就停掉代理 —— 宿主侧的钩子只认「端口通不通」，不需要别的同步。
+        try {
+            if (Prefs.aiTakeover(app)) {
+                AiProxy.start(app);
+                announceAiMode(app, true);
+            } else {
+                AiProxy.stop();
+                announceAiMode(app, false);
+            }
+        } catch (Throwable t) {
+            Logx.w("[tile] 启动 AI 代理失败：" + t.getMessage());
+        }
+
         try {
             final boolean root = RootShell.isGranted(app);
 
@@ -272,8 +288,11 @@ public class ShotTileService extends TileService {
                             // 拿到精确路径后，直接触发"指定路径派发"：连点时上一张图
                             // 还没删，宿主靠 newestShot() 猜"最新"会猜错、丢图。
                             // 这里把确切路径送过去，宿主就派发这一张、不再猜。
+                            // 拿到精确路径后，交给**模块侧的串行队列**：一次只派一张，
+                            // 等宿主回执再派下一张。原来这里是直接甩给宿主排队，
+                            // 而宿主队列会在引擎回收时整批清空 —— 连点 10 张偶发丢 1 张。
                             final String shotPath = p;
-                            HostLauncher.requestHeadlessDispatch(app, shotPath);
+                            DispatchQueue.submit(app, shotPath);
                         } else {
                             Logx.w("[tile] screencap 失败 -> 退回 root 注入按键");
                         }
@@ -349,9 +368,28 @@ public class ShotTileService extends TileService {
             Logx.e("[tile] startActivityAndCollapse failed, fallback to toast", t);
         }
         try {
-            Toast.makeText(this, "点一下磁贴记账需要 root：请打开「BeeCountHelper」并点「root 权限」",
+            Toast.makeText(this, "点一下磁贴记账需要 root：请打开「BeeTap」并点「root 权限」",
                     Toast.LENGTH_LONG).show();
         } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 告诉宿主进程「代理现在通不通」。
+     *
+     * <p>只是加速通道：宿主侧的 {@link AiTakeover} 每次都会自己探测端口，
+     * 探测结果是权威。广播的意义在于「用户刚关掉开关」时立刻生效，
+     * 不用等那 2 秒的探测缓存过期。
+     */
+    private void announceAiMode(Context app, boolean enabled) {
+        try {
+            Intent it = new Intent(Const.ACTION_AI_MODE);
+            it.setPackage(HostInfo.pkg());
+            it.putExtra(Const.EXTRA_AI_ENABLED, enabled);
+            it.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+            app.sendBroadcast(it);
+        } catch (Throwable t) {
+            Logx.w("[tile] 发送 AI 开关广播失败：" + t.getMessage());
         }
     }
 
