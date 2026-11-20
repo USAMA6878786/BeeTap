@@ -169,6 +169,21 @@ public class SettingsActivity extends Activity {
                     }
                 });
 
+        // 接管 AI 识别：模块在本地架代理，代替蜜蜂记账去访问 AI。
+        // 关掉就停掉代理 —— 宿主侧的钩子只探测端口通不通，探测不到就回到直连（旧行为）。
+        Ui.switchRow(this, behaviorCard, "接管 AI 识别",
+                "由 BeeTap 代发 AI 请求，避开蜜蜂记账被冻结导致的「识别失败」",
+                Prefs.aiTakeover(this), new Ui.OnToggle() {
+                    @Override
+                    public void onToggle(boolean on) {
+                        Prefs.setAiTakeover(SettingsActivity.this, on);
+                        Logx.i("[settings] ai-takeover set to " + on);
+                        if (!on) {
+                            AiProxy.stop();
+                        }
+                    }
+                });
+
         // ---------------- 小组件 ----------------
         LinearLayout widgetCard = Ui.card(this, root, "桌面小组件");
         final TextView alphaLabel = Ui.rowTitle(this, "背景不透明度  85%");
@@ -302,10 +317,12 @@ public class SettingsActivity extends Activity {
             + "• 给本模块 root（截屏、收面板、删图都要用）——蜜蜂记账本体不需要 root\n"
             + "• 打开一次蜜蜂记账，进「智能记账」确认「截图自动记账」是开着的\n"
             + "• 点上面的「添加」，把「记账」磁贴放进控制中心\n"
-            + "• ⚠️ 必须把蜜蜂记账的省电策略设为「无限制」，否则识别会失败\n\n"
+            + "• 建议把蜜蜂记账的省电策略设为「无限制」：不设也能用（AI 请求由 BeeTap 代发），"
+            + "只是排队时会多等几次系统解冻\n\n"
             + "截屏只有一条路：root 直接抓帧（约 0.25 秒）；抓帧失败才退回 root 注入按键。\n\n"
-            + "整个过程：收起面板 → 等 0.1 秒 → 截屏 → 弹「截图成功」→ 蜜蜂记账识别 → 识别完成后删图。\n\n"
-            + "从点击到删图实测约 4~7 秒，大头在蜜蜂记账自己的检测与 AI 识别（3~5 秒）。";
+            + "整个过程：收起面板 → 等 0.1 秒 → 截屏 → 弹「截图成功」→ BeeTap 代发 AI 请求 → "
+            + "蜜蜂记账解析并落库 → 删图。\n\n"
+            + "从点击到删图实测约 4~7 秒，大头在 AI 识别（3~5 秒）；连点时会排队，逐个处理。";
 
     /** 常见问题。 */
     private static final String FAQ =
@@ -314,10 +331,10 @@ public class SettingsActivity extends Activity {
             + "（没给通知权限时这个提示会被系统吞掉，去系统设置里给「BeeTap」打开通知即可）；"
             + "③ 蜜蜂记账的「截图自动记账」是否开着（进「智能记账」确认）。\n\n"
             + "提示「识别失败」？\n"
-            + "根因是系统每 5 秒左右冻结一次后台的蜜蜂记账，冻结瞬间掐断它到 AI 的连接（网络报错）。"
-            + "识别一次要 3~8 秒，期间几乎必然撞上一次冻结，所以这不是偶发、不设对就会频繁失败。"
-            + "【必须】把蜜蜂记账的省电策略设为「无限制」（系统设置 → 应用 → 蜜蜂记账 → 省电策略），"
-            + "设成之后系统就不再冻结它，识别失败才会消失。\n\n"
+            + "识别请求现在是 BeeTap 代发的（不是蜜蜂记账自己发），所以系统冻结它不会再掐断连接。"
+            + "还失败通常是这几种：① AI Key 失效或额度用尽；② 手机没有网络、或代理把请求挡了；"
+            + "③ 这张截图里确实没有账单（会显示「未识别到账单」）。\n"
+            + "想确认是不是代理的问题：把「接管 AI 识别」关掉再点一次，它就会回到蜜蜂记账直连 AI。\n\n"
             + "改了配置不生效？\n"
             + "hook 只在蜜蜂记账启动时注入，点「重启蜜蜂记账」。\n\n"
             + "小部件数字不更新？\n"

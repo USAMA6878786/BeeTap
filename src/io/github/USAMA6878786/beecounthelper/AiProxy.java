@@ -68,11 +68,8 @@ final class AiProxy {
     private static volatile boolean running = false;
     private static volatile int port = -1;
 
-    /** 最近一次转发是否成功（设置页/日志用）。 */
-    static volatile long lastOkAt = 0L;
+    /** 最近一次失败原因（拼进 502 响应体，方便宿主日志里直接看出是哪一步坏了）。 */
     static volatile String lastError = null;
-    static volatile int hitCount = 0;
-    static volatile int missCount = 0;
 
     private static final Map<String, CacheEntry> CACHE =
             new LinkedHashMap<String, CacheEntry>(8, 0.75f, true) {
@@ -222,13 +219,11 @@ final class AiProxy {
             String key = imageHash(body);
             Cached cached = lookupCache(key);
             if (cached != null) {
-                hitCount++;
                 Logx.i("[ai-proxy] ✔ 命中缓存（" + key.substring(0, 8) + "），直接返回 "
                         + cached.body.length + "B");
                 writeRaw(out, 200, cached.contentType, cached.body);
                 return;
             }
-            missCount++;
 
             PowerManager.WakeLock wl = acquire(ctx);
             try {
@@ -242,7 +237,6 @@ final class AiProxy {
                 }
                 if (r.code == 200 && key != null) {
                     putCache(key, r);
-                    lastOkAt = System.currentTimeMillis();
                     lastError = null;
                 }
                 Logx.i("[ai-proxy] → HTTP " + r.code + " " + r.body.length + "B（上游 "

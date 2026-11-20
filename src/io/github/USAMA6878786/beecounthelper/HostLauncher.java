@@ -29,24 +29,6 @@ final class HostLauncher {
     /** 3 秒内只试一次（只挡住同一次点击里的重复调用）。 */
     private static final long DEBOUNCE_MS = 3_000L;
 
-    /**
-     * 派发补发的总时长。
-     *
-     * <p>必须覆盖「宿主进程被回收 → 点磁贴 → 进程重新起来」这段空档
-     * （本机实测约 7 秒，慢的机型更久）。原来只有 2.1 秒，连点时前几张全丢。
-     */
-    /**
-     * 派发补发的总时长。**统一 20 秒，不要按"进程在不在"分档**。
-     *
-     * <p>必须覆盖「宿主进程被回收 → 点磁贴 → 进程重新起来」这段空档
-     * （本机实测约 7 秒，慢的机型更久）。原来只有 2.1 秒，连点时前几张全丢。
-     *
-     * <p>也试过「进程在 → 只补发 6 秒」省开销，<b>实测否掉</b>：那一轮 10 张里有一张
-     * 从未被派发 —— 进程当时在，但随后被冻结/回收，6 秒后补发就停了，没人再叫醒它。
-     * 同一路径重发对宿主是幂等的（按 DISPATCHED_HISTORY 去重），宁可多发包也别丢图。
-     */
-    private static final long DISPATCH_RETRY_MS = 20_000L;
-
     private static volatile long lastTryAt = 0L;
 
     private HostLauncher() {
@@ -123,123 +105,6 @@ final class HostLauncher {
         }
     }
 
-    /**
-     * 告诉刚被拉起来的宿主进程："起无界面引擎，把最新那张截图派发进去"。
-     *
-     * <p>用普通 sendBroadcast 就够：这时宿主进程已经在跑（不是 stopped 状态），
-     * 而我们注册的是**动态接收器**，不受后台隐式广播的限制。
-     */
-    static void requestHeadlessDispatch(android.content.Context ctx) {
-        requestHeadlessDispatch(ctx, null);
-    }
-
-    /**
-     * 告诉刚被拉起来的宿主进程："起无界面引擎，把这张截图派发进去"。
-     *
-     * <p>用普通 sendBroadcast 就够：这时宿主进程已经在跑（不是 stopped 状态），
-     * 而我们注册的是**动态接收器**，不受后台隐式广播的限制。
-     *
-     * @param path 本次截图的精确路径；null 表示让宿主自己取最新（冷启动兜底用）
-     */
-    static void requestHeadlessDispatch(android.content.Context ctx, String path) {
-        String pkg = HostInfo.pkg(ctx);
-        if (pkg == null || pkg.length() == 0) {
-            return;
-        }
-        try {
-            // 先起解冻续命线程（异步，不阻塞）：它内部第一下会立即戳，
-            // 尽早把可能已被冻结的进程解冻，让紧接着的广播更容易送达。
-            // 自适应校准（异步、只跑一次）：按本机实测的冻结周期算出该 sleep 多久，
-            // 不同 ROM/机型的冻结周期可能不是 5 秒，硬编码会失效。
-            //
-            // 2026-11-20 起默认关闭：AI 网络等待已搬到模块进程，宿主不再有长连接；
-            // 「让广播更容易送达」这件事由下面的 20 秒补发 + 每 4 秒 pullUp 兜住，
-            // 而这条循环每次都要挂一个 26 秒的 root shell。见 Const.ENABLE_THAW_LOOP。
-            ensureThaw(ctx, pkg);
-
-            // 用 root 的 am broadcast 发派发请求：普通 sendBroadcast 在被冻结的
-            //    宿主上投不到（动态接收器虽在，但进程冻结着收不到），root 的 shell
-            //    广播带 FLAG_RECEIVER_INCLUDE_BACKGROUND，能直达后台/冻结进程。
-            StringBuilder extras = new StringBuilder();
-            extras.append("--ez ").append(Const.EXTRA_AUTO_DELETE).append(' ')
-                    .append(Prefs.autoDelete(ctx) ? "true" : "false");
-            if (path != null && path.length() > 0) {
-                extras.append(" --es ").append(Const.EXTRA_PATH).append(' ').append(path);
-            }
-            RootShell.broadcast(Const.ACTION_HEADLESS, pkg, extras.toString(),
-                    Intent.FLAG_RECEIVER_FOREGROUND | Const.FLAG_RECEIVER_INCLUDE_BACKGROUND);
-            Logx.i("[launch] 已请求无界面派发" + (path != null ? "（指定路径）" : ""));
-
-            // 补发窗口 **20 秒**（原来 3 次 ×700ms ≈ 2.1 秒）。
-            //
-            // 为什么必须这么长（2026-11-20 实测）：宿主被系统回收后再点磁贴，
-            // 从广播到「进程真的起来、接收器注册好」要 **约 7 秒**。原来那 2 秒
-            // 窗口全部落在进程还没起来的空档里，广播直接丢掉 —— 连点 10 次丢了 2 张，
-            // 表现就是「点了没记账」，而且要等 75 秒清理器超时才删图。
-            //
-            // 同一张图重发是安全的：宿主按路径去重（DISPATCHED_HISTORY / 队列 contains），
-            // 重复不会重复记账。收到宿主回执说这张 processed 就提前收工。
-            final String fpkg = pkg;
-            final String fextras = extras.toString();
-            final String fpath = path;
-            final android.content.Context appCtx =
-                    ctx.getApplicationContext() == null ? ctx : ctx.getApplicationContext();
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    final long window = DISPATCH_RETRY_MS;
-                    final long deadline = System.currentTimeMillis() + window;
-                    long lastPullUpAt = System.currentTimeMillis();
-                    int n = 0;
-                    while (System.currentTimeMillis() < deadline) {
-                        try {
-                            Thread.sleep(n < 6 ? 700L : 1_300L);
-                        } catch (InterruptedException e) {
-                            return;
-                        }
-                        if (ShotBridge.isProcessed(fpath)) {
-                            Logx.i("[launch] 宿主已确认处理这张，停止补发（共 " + n + " 次）");
-                            return;
-                        }
-                        // 每 4 秒重新拉一次：进程若已被回收，只有"拉起"才能让它重新存在，
-                        // 光发广播唤不醒一个不存在的进程。
-                        if (System.currentTimeMillis() - lastPullUpAt >= 4_000L) {
-                            lastPullUpAt = System.currentTimeMillis();
-                            try {
-                                pullUp(appCtx);
-                            } catch (Throwable ignored) {
-                            }
-                        }
-                        n++;
-                        // 每 5 次走一次 root 广播（能穿冻结/后台限制，但每次都要起一个 su 进程，
-                        // 连点时开销不能忽视）；其余用普通广播，进程活着时一样能到。
-                        if (n % 5 == 1) {
-                            RootShell.broadcast(Const.ACTION_HEADLESS, fpkg, fextras,
-                                    Intent.FLAG_RECEIVER_FOREGROUND
-                                            | Const.FLAG_RECEIVER_INCLUDE_BACKGROUND);
-                        } else if (appCtx != null) {
-                            try {
-                                Intent it = new Intent(Const.ACTION_HEADLESS);
-                                it.setPackage(fpkg);
-                                it.putExtra(Const.EXTRA_AUTO_DELETE, Prefs.autoDelete(appCtx));
-                                if (fpath != null && fpath.length() > 0) {
-                                    it.putExtra(Const.EXTRA_PATH, fpath);
-                                }
-                                it.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
-                                appCtx.sendBroadcast(it);
-                            } catch (Throwable ignored) {
-                            }
-                        }
-                        Logx.i("[launch] 补发派发请求 #" + n);
-                    }
-                    Logx.w("[launch] 派发补发已满 " + (window / 1000) + " 秒，停止"
-                            + (fpath == null ? "" : "：" + fpath.substring(fpath.lastIndexOf('/') + 1)));
-                }
-            }, "bee-dispatch-retry").start();
-        } catch (Throwable t) {
-            Logx.w("[launch] 请求派发失败：" + t.getMessage());
-        }
-    }
 
     // ---------------- MIUI 冻结解冻（GreezeManager） ----------------
     //
@@ -261,18 +126,11 @@ final class HostLauncher {
     // ★ 实测结论（2026-10-25，logcat 铁证）：GreezeManager 的冻结是**固定定时器**——
     //   每次真正 THAW 之后，硬等 **约 5.2 秒**就再冻结一次，与进程有没有 binder 流量无关。
     //
-    //   重要澄清（纠正早期错误结论）：content query 戳 provider **只能"冻结后立刻解冻"**，
-    //   把"冻结态持续时长"从几秒压到约 0.33 秒（THAW→FZ 稳定 0.33s）。但它**阻止不了
-    //   冻结本身**——冻结那一瞬间，蜜蜂记账到智谱 AI 的 TCP 连接已经断了，解冻再快也
-    //   救不回，AI 请求照样报 Network error。
-    //
-    //   ★ 识别失败（Network error）的根因是冻结断连，与"窗口多长"无关：
-    //   实测 Network error 的相邻间隔 86% 集中在 5.2 秒，和冻结周期精确吻合。
-    //   真正的解法是「省电策略设无限制」（系统不冻结）；本段"对齐解冻"只能
-    //   *略微*缩短冻结态、让广播/派发更容易送达，**无法替代无限制**。
-    //
-    //   所以本段保留的意义有限：它让"冻结后尽快解冻"，减少广播被冻结窗口拒掉的概率
-    //   （连点时约 1/3 派发会被拒），但对"识别失败"本身没有实质改善。
+    //   2026-11-20 更新：AI 请求已经搬到模块进程（AiProxy），宿主不再持有 6~10 秒的长连接，
+    //   因此「冻结断连 → 识别失败」这条路已经不存在了。
+    //   但这条循环**仍然必须跑**：冻结期间 Flutter 引擎同样跑不动 ——
+    //   实测关掉它时连点 10 张只有 0 张能记账（引擎全部卡在"排队等派发"）。
+    //   也就是说，它保护的对象从「AI 长连接」变成了「引擎能跑完」本身。
 
     /** 循环里两次戳之间的 sleep：4.15s + 戳本身约 1.0s ≈ 5.15s 周期。 */
     private static final long ALIGN_SLEEP_MS = 4_150L;
@@ -405,17 +263,6 @@ final class HostLauncher {
     private static volatile boolean thawLoopRunning = false;
 
     /**
-     * 起一条解冻循环：一次 su 里循环戳 provider，让蜜蜂记账"冻结后尽快被解冻"。
-     *
-     * <p><b>注意</b>：这只能缩短"冻结态持续时长"（约 0.33 秒），**阻止不了冻结本身**，
-     * 因此对「识别失败」（冻结瞬间断连导致的 Network error）没有实质改善——那是
-     * 「省电策略设无限制」才能解决的。本循环的意义仅在于：让广播/派发更容易送达，
-     * 减少连点时广播被冻结窗口拒掉的概率。
-     *
-     * <p>必须跑在**模块自己的进程**里（本类就是）：宿主被冻结时它内部所有线程一起被冻，
-     * 在宿主里起的解冻线程自己也发不出 binder（实测只戳 1 次就停）。
-     */
-    /**
      * 确保解冻保活循环在跑（幂等）。
      *
      * <p><b>派发期间必须有人一直在戳宿主</b>：MIUI 冻结后台进程后只有外部 binder 触碰
@@ -423,9 +270,6 @@ final class HostLauncher {
      * 实测关掉这条循环时，10 张连点只有 0 张能记账。
      */
     static void ensureThaw(Context ctx, String pkg) {
-        if (!Const.ENABLE_THAW_LOOP) {
-            return;
-        }
         try {
             calibrateAsync(ctx, pkg);
             startThawLoop(ctx, pkg);
@@ -434,6 +278,12 @@ final class HostLauncher {
         }
     }
 
+    /**
+     * 起一条解冻循环：一次 su 里循环戳宿主的 provider，让它每次被冻结后尽快解冻。
+     *
+     * <p>节拍对齐到实测冻结周期（本机约 5.2 秒）+150ms：每次冻结后约 150ms 内就被戳醒，
+     * 冻结态占比约 3%。**不要再加密** —— 更密只是去戳一个本来醒着的进程，收益为零。
+     */
     private static void startThawLoop(final Context ctx, final String pkg) {
         if (thawLoopRunning) {
             return;

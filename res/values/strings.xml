@@ -3,5 +3,5 @@
     <string name="app_name">BeeTap</string>
     <string name="tile_label">记账</string>
     <string name="widget_label">记账支出</string>
-    <string name="module_description">按需触发的截图记账：默认拦截蜜蜂记账对系统截图的自动识别，只有点击控制中心「记账」磁贴那一次，才收起面板、延迟截屏并交给 BeeCount 识别记账。</string>
+    <string name="module_description">按需触发的截图记账：默认拦截蜜蜂记账对系统截图的自动识别，只有点击控制中心「记账」磁贴那一次，才收起面板、截屏并交给它记账；截图识别的 AI 请求由 BeeTap 在本机代理转发，宿主被系统冻结也不会中断。</string>
 </resources>

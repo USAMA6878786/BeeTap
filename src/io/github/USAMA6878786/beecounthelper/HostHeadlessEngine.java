@@ -46,10 +46,6 @@ final class HostHeadlessEngine {
     private static volatile boolean dartReady = false;
     private static volatile boolean started = false;
 
-    /** 上一次派发过的路径：标记路径和广播路径可能同时触发，同一张只能派发一次。 */
-    private static volatile String dispatchedPath;
-
-
     /**
      * 空闲多久就把引擎销毁（省内存）。
      *
@@ -93,16 +89,12 @@ final class HostHeadlessEngine {
     /** 界面引擎出现时有活在飞，等回执完再撤。 */
     private static volatile boolean yieldPending;
 
-    /** 已经删过的路径（兜底时用来跳过）。 */
-    private static volatile String cleanedPath;
-
     /**
      * 已经收到 Dart 回执的图片路径。
      *
      * <p><b>为什么必须是集合而不是一个字段（实测 2026-10-26）</b>：20 秒兜底删图原来靠
-     * {@code wdPath.equals(cleanedPath)} 判断，但 {@code cleanedPath} 只有一个、会被
-     * 后一张覆盖。连点时前一张的回执早就到了，兜底计时器到点却拿它跟"最后一张"比，
-     * 判定成"没回执"，于是日志里一堆假的「20 秒没回执」。
+     * 用单个"最后一张"字段判断，它会被后一张覆盖：连点时前一张的回执早就到了，
+     * 兜底计时器到点却拿它跟"最后一张"比，判定成"没回执"，日志里一堆假的「20 秒没回执」。
      * 更要紧的是：如果某张识别真的超过 20 秒，它会在回执前被这个误判删掉。
      */
     private static final java.util.Set<String> SETTLED =
@@ -479,19 +471,8 @@ final class HostHeadlessEngine {
         }
     }
 
-    private static String newestShot() {
-        try {
-            RootShell.Result r = RootShell.exec(
-                    "ls -t /sdcard/DCIM/Screenshots/*beehelper* 2>/dev/null | head -1", 5000L);
-            String f = r.out == null ? "" : r.out.trim();
-            return f.length() > 0 ? f : null;
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
     /**
-     * 带重试的派发：取到的最新图若已经派发过（说明新图还没落盘），等一会儿再试。
+     * 带重试的派发：取的图若已经派发过（说明新图还没落盘），等一会儿再试。
      * 最多试 3 次，总共约 3.6 秒。
      */
     private static void attemptDispatch(final int attempt) {
@@ -547,7 +528,7 @@ final class HostHeadlessEngine {
 
     /**
      * 等派发的截图队列。**一次只派一张**：Dart 那边同一时刻只处理一张，
-     * 同时塞进去两张会互相覆盖 {@code inflight}/{@code dispatchedPath}，
+     * 同时塞进去两张会互相覆盖 {@code inflight}/队列状态，
      * 结果是"有一张没识别 + 删错文件"。
      *
      * <p>为什么必须有队列：连点时（间隔 2~3 秒）识别还没回来，下一张就到了。
@@ -640,7 +621,6 @@ final class HostHeadlessEngine {
                 it.remove();
             }
         }
-        dispatchedPath = path;
         inflight = path;
         lastActivityAt = System.currentTimeMillis();
         scheduleIdleCheck();
@@ -691,7 +671,7 @@ final class HostHeadlessEngine {
                                 // 它认了（账记上了），但不会写我们依赖的"落库完成"日志，
                                 // 所以这里以回执为准去删图，别再等配对。
                                 //
-                                // 用**闭包里捕获的那张**，不读 dispatchedPath：
+                                // 用**闭包里捕获的那张**，不读全局变量：
                                 // 连点时全局变量可能已经被下一张覆盖，读它会删错文件。
                                 //
                                 // 这里曾经固定 sleep 1500ms 再删，理由是"怕它还没写完库"。
@@ -699,7 +679,6 @@ final class HostHeadlessEngine {
                                 // 这 1.5 秒纯属白等，而且它压在"点磁贴 → 图消失"这条感知路径上。
                                 // 现在只留 250ms 给它的通知/相册扫描一点余量。
                                 final String p = dispatchPath;
-                                cleanedPath = p;
                                 new Thread(new Runnable() {
                                     @Override
                                     public void run() {
@@ -759,7 +738,7 @@ final class HostHeadlessEngine {
                 @Override
                 public void run() {
                     // 回执到了就跳过（回执路径里已经安排删图了）。
-                    // 用集合而不是 cleanedPath：连点时后者会被后一张覆盖，导致误判。
+                    // 用集合而不是单个字段：后者会被后一张覆盖，导致误判。
                     if (SETTLED.contains(wdPath)) {
                         return;
                     }
