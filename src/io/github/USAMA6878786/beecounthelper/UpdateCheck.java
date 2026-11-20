@@ -44,7 +44,14 @@ final class UpdateCheck {
             "https://cdn.jsdelivr.net/gh/USAMA6878786/BeeCountHelper@main/update.json",
     };
 
-    private static final int TIMEOUT_MS = 9000;
+    /**
+     * 单条请求的超时。9 秒太长：raw 被墙时是"黑洞式"超时（连接挂着不动），
+     * 串行试两条就是 18 秒起步，用户感觉就是"点了半天没反应"。5 秒足够判定死活。
+     */
+    private static final int TIMEOUT_MS = 5_000;
+
+    /** 两条镜像并行竞速的总等待上限。超时后放弃（后面还有 Releases 兜底）。 */
+    private static final long JSON_RACE_MS = 7_000L;
 
     /** 检查结果。 */
     static final class Info {
@@ -112,33 +119,66 @@ final class UpdateCheck {
         }
     }
 
+    /**
+     * 两条镜像**并行竞速**，谁先回来用谁的。
+     *
+     * <p>为什么不用串行：raw 被墙时是"黑洞超时"（连接挂着不动直到超时），
+     * 串行等完第一条再试第二条，用户面前的「检查更新」要干等十几秒。
+     * 并行之后，总耗时 ≈ 较快那条的耗时（实测 1~3 秒）。
+     */
     private static Info tryJson() {
-        String lastErr = "没有可用的 update.json 地址";
-        for (String url : JSON_URLS) {
-            try {
-                String body = http(url);
-                if (body == null) {
-                    lastErr = "连不上 " + hostOf(url);
-                    Logx.w("[update] " + lastErr);
-                    continue;
+        final java.util.concurrent.atomic.AtomicReference<Info> ok =
+                new java.util.concurrent.atomic.AtomicReference<Info>(null);
+        final java.util.concurrent.atomic.AtomicReference<String> lastErr =
+                new java.util.concurrent.atomic.AtomicReference<String>("没有可用的 update.json 地址");
+        final java.util.concurrent.CountDownLatch done =
+                new java.util.concurrent.CountDownLatch(JSON_URLS.length);
+
+        for (int i = 0; i < JSON_URLS.length; i++) {
+            final String url = JSON_URLS[i];
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String body = http(url);
+                        if (body == null) {
+                            lastErr.set("连不上 " + hostOf(url));
+                            Logx.w("[update] " + lastErr.get());
+                            return;
+                        }
+                        String tag = pick(body, "\"version\"\\s*:\\s*\"([^\"]+)\"");
+                        String apk = pick(body, "\"zipUrl\"\\s*:\\s*\"([^\"]+)\"");
+                        if (tag == null || tag.length() == 0) {
+                            lastErr.set("update.json 里没有版本号（" + hostOf(url) + "）");
+                            Logx.w("[update] " + lastErr.get());
+                            return;
+                        }
+                        Logx.i("[update] update.json（" + hostOf(url) + "）: version=" + tag
+                                + " apk=" + apk);
+                        ok.set(new Info(true, normalize(tag), apk, null, null,
+                                "json（" + hostOf(url) + "）"));
+                    } catch (Throwable t2) {
+                        lastErr.set(shortMsg(t2));
+                        Logx.w("[update] " + hostOf(url) + "：" + lastErr.get());
+                    } finally {
+                        done.countDown();
+                    }
                 }
-                String tag = pick(body, "\"version\"\\s*:\\s*\"([^\"]+)\"");
-                String apk = pick(body, "\"zipUrl\"\\s*:\\s*\"([^\"]+)\"");
-                if (tag == null || tag.length() == 0) {
-                    lastErr = "update.json 里没有版本号（" + hostOf(url) + "）";
-                    Logx.w("[update] " + lastErr);
-                    continue;
-                }
-                String version = normalize(tag);
-                Logx.i("[update] update.json（" + hostOf(url) + "）: version=" + tag
-                        + " apk=" + apk);
-                return new Info(true, version, apk, null, null, "json");
-            } catch (Throwable t) {
-                lastErr = shortMsg(t);
-                Logx.w("[update] " + lastErr);
-            }
+            }, "bee-update-json");
+            t.setDaemon(true);
+            t.start();
         }
-        return new Info(false, null, null, null, lastErr, "json");
+
+        try {
+            done.await(JSON_RACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        Info found = ok.get();
+        if (found != null) {
+            return found;
+        }
+        return new Info(false, null, null, null, lastErr.get(), "json");
     }
 
     /** 只为日志取个短名，别把整串 URL 打出来。 */
