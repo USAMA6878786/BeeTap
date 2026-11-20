@@ -17,6 +17,8 @@
   （改造前多轮为 9/10）。
 
 ### 其他
+- 检查更新改为以 `update.json` 为权威源（raw → jsDelivr 双通道，Releases API 仅兜底）：
+  v4.0 起 APK 随仓库分发、不建 Release，旧逻辑先问 Releases API 会把旧版本当成"云端版本"
 - 应用更名：**BeeCountHelper → BeeTap**（包名、模块 ID 不变，不影响 LSPosed 作用域与 root 授权）
 - APK 改为随仓库分发，`update.json` 指向仓库内的 `BeeTap-v4.0.apk`
 - 代码清理：删掉被串行队列取代的旧派发路径（`requestHeadlessDispatch`）、只写不读的字段与

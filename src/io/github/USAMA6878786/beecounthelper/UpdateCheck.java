@@ -11,28 +11,38 @@ import java.util.regex.Pattern;
 /**
  * 「检查更新」：问一次 GitHub，比较版本号。
  *
- * <h3>为什么两条路</h3>
+ * <h3>为什么两条路（v4.0 起以 update.json 为准）</h3>
  * <ul>
- *   <li><b>GitHub Releases API</b>——给的是发布页里那一版，信息全（tag、下载地址、说明页）。
- *       缺点是未登录调用**限速 60 次/小时/IP**，而且必须带 {@code User-Agent}，
- *       否则直接 403。</li>
- *   <li><b>仓库里的 {@code update.json}</b>——一个几十字节的文件，走 raw.githubusercontent，
- *       没有限速。它同时是 LSPosed 自带的更新检查用的那份，所以两边口径一致。</li>
+ *   <li><b>仓库里的 {@code update.json}</b>——几十字节的小文件，走 raw.githubusercontent，
+ *       没有限速。v4.0 起 APK 改为**随仓库分发**（raw 直链），它就是唯一权威：
+ *       LSPosed 自带的更新检查用的也是这份，两边口径一致。</li>
+ *   <li><b>GitHub Releases API</b>——信息全（tag、下载地址、说明页），但 Releases 需要人
+ *       手动维护；只发仓库不发 Release 时，API 会返回旧版本。所以只做兜底。</li>
  * </ul>
- * 先走 API（信息更准），失败再走 update.json；两条都不通才算"检查失败"，
- * 而不是把限速当成"网络坏了"。
+ * 先走 update.json（权威），失败再走 Releases API；两条都不通才算"检查失败"。
  *
  * <h3>为什么不用 JSON 库</h3>
  * 这个模块是 javac 直接对着 android.jar 编译的，没有任何第三方依赖。
- * 这里只需要三个字段，用正则从原文里抠出来比引入 gson 划算得多
- * （而且 GitHub 的 returns 结构稳定，字段名不会变）。
+ * 这里只需要三个字段，用正则从原文里抠出来比引入 gson 划算得多。
  */
 final class UpdateCheck {
 
+    /** 权威来源：仓库里的 update.json（随版本一起提交，LSPosed 也读它）。 */
     private static final String API =
             "https://api.github.com/repos/USAMA6878786/BeeCountHelper/releases/latest";
-    private static final String FALLBACK =
-            "https://raw.githubusercontent.com/USAMA6878786/BeeCountHelper/main/update.json";
+
+    /**
+     * update.json 的候选地址，按顺序试。
+     *
+     * <p><b>为什么要两条</b>（2026-11-20 实机踩的坑）：`raw.githubusercontent.com`
+     * 在国内网络经常直连不通（DNS 污染/被墙），应用内的 HttpURLConnection 又不走系统代理
+     * —— 结果权威源失败，兜底落回 Releases API，把旧 Release 的版本号当成"云端版本"。
+     * jsDelivr 的 CDN 在国内一般可达，内容相同（同一仓库同一分支）。
+     */
+    private static final String[] JSON_URLS = {
+            "https://raw.githubusercontent.com/USAMA6878786/BeeCountHelper/main/update.json",
+            "https://cdn.jsdelivr.net/gh/USAMA6878786/BeeCountHelper@main/update.json",
+    };
 
     private static final int TIMEOUT_MS = 9000;
 
@@ -68,18 +78,18 @@ final class UpdateCheck {
 
     /** 拉一次远端版本信息。**阻塞**，调用方放子线程。 */
     static Info fetch() {
-        Info api = tryApi();
-        if (api.ok) {
-            return api;
-        }
-        Logx.w("[update] API 失败：" + api.error + "，改用 update.json");
         Info json = tryJson();
         if (json.ok) {
             return json;
         }
-        // 两条都失败时，优先报 API 的原因（更可能是"网络"而不是"文件不存在"）
+        Logx.w("[update] update.json 失败：" + json.error + "，改用 Releases API");
+        Info api = tryApi();
+        if (api.ok) {
+            return api;
+        }
+        // 两条都失败时，优先报 update.json 的原因（它才是权威来源）
         return new Info(false, null, null, null,
-                api.error != null ? api.error : json.error, "none");
+                json.error != null ? json.error : api.error, "none");
     }
 
     private static Info tryApi() {
@@ -103,21 +113,40 @@ final class UpdateCheck {
     }
 
     private static Info tryJson() {
+        String lastErr = "没有可用的 update.json 地址";
+        for (String url : JSON_URLS) {
+            try {
+                String body = http(url);
+                if (body == null) {
+                    lastErr = "连不上 " + hostOf(url);
+                    Logx.w("[update] " + lastErr);
+                    continue;
+                }
+                String tag = pick(body, "\"version\"\\s*:\\s*\"([^\"]+)\"");
+                String apk = pick(body, "\"zipUrl\"\\s*:\\s*\"([^\"]+)\"");
+                if (tag == null || tag.length() == 0) {
+                    lastErr = "update.json 里没有版本号（" + hostOf(url) + "）";
+                    Logx.w("[update] " + lastErr);
+                    continue;
+                }
+                String version = normalize(tag);
+                Logx.i("[update] update.json（" + hostOf(url) + "）: version=" + tag
+                        + " apk=" + apk);
+                return new Info(true, version, apk, null, null, "json");
+            } catch (Throwable t) {
+                lastErr = shortMsg(t);
+                Logx.w("[update] " + lastErr);
+            }
+        }
+        return new Info(false, null, null, null, lastErr, "json");
+    }
+
+    /** 只为日志取个短名，别把整串 URL 打出来。 */
+    private static String hostOf(String url) {
         try {
-            String body = http(FALLBACK);
-            if (body == null) {
-                return new Info(false, null, null, null, "连不上 GitHub", "json");
-            }
-            String tag = pick(body, "\"version\"\\s*:\\s*\"([^\"]+)\"");
-            String apk = pick(body, "\"zipUrl\"\\s*:\\s*\"([^\"]+)\"");
-            if (tag == null || tag.length() == 0) {
-                return new Info(false, null, null, null, "update.json 里没有版本号", "json");
-            }
-            String version = normalize(tag);
-            Logx.i("[update] update.json: version=" + tag + " apk=" + apk);
-            return new Info(true, version, apk, null, null, "json");
+            return new java.net.URL(url).getHost();
         } catch (Throwable t) {
-            return new Info(false, null, null, null, shortMsg(t), "json");
+            return url;
         }
     }
 
@@ -175,7 +204,7 @@ final class UpdateCheck {
             conn.setReadTimeout(TIMEOUT_MS);
             conn.setRequestProperty("Accept", "application/vnd.github+json");
             // GitHub API 强制要求 UA，不给就是 403
-            conn.setRequestProperty("User-Agent", "BeeCountHelper/" + BuildInfo.VERSION_NAME);
+            conn.setRequestProperty("User-Agent", "BeeTap/" + BuildInfo.VERSION_NAME);
             conn.setInstanceFollowRedirects(true);
             int code = conn.getResponseCode();
             if (code != 200) {
