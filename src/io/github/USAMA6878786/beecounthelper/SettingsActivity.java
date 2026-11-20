@@ -57,9 +57,22 @@ public class SettingsActivity extends Activity {
         setContentView(scroll);
 
         // ---------------- 标题 ----------------
-        root.addView(Ui.title(this, "BeeTap"), Ui.lp(-1, -2, 0, 4, 0, 2));
+        root.addView(Ui.title(this, "BeeTap"), Ui.lp(-1, -2, 0, 12, 0, 4));
         root.addView(Ui.caption(this, "v" + versionName() + " · 点磁贴才记账"),
-                Ui.lp(-1, -2, 0, 0, 0, 14));
+                Ui.lp(-1, -2, 0, 0, 0, 12));
+
+        // 状态胶囊：整页唯一"一眼能看到当前状态"的地方（设计上的焦点元素）。
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        boolean rootOk = RootShell.isGranted(this);
+        TextView c1 = statusChip(rootOk, rootOk ? "root 已授权" : "root 未授权");
+        chips.addView(c1);
+        TextView c2 = statusChip(Prefs.aiTakeover(this),
+                Prefs.aiTakeover(this) ? "AI 由 BeeTap 代发" : "AI 直连");
+        LinearLayout.LayoutParams c2lp = new LinearLayout.LayoutParams(-2, -2);
+        c2lp.leftMargin = Ui.dp(this, 8);
+        chips.addView(c2, c2lp);
+        root.addView(chips, Ui.lp(-1, -2, 0, 0, 0, 20));
 
         // ---------------- 操作 ----------------
         // 这里原来是一张"自检"状态卡：● 就绪 / root ✓ · 无障碍 ✓。
@@ -299,6 +312,19 @@ public class SettingsActivity extends Activity {
                 }, "bee-compress-init").start();
             }
         }, 1800L);   // 等页面入场动画走完再抓帧：否则参照图和 raw 不是同一画面
+    }
+
+    /** 状态胶囊：暖色底 + 中等字重，比一行灰字更容易被"扫到"。 */
+    private TextView statusChip(boolean positive, String text) {
+        TextView t = new TextView(this);
+        t.setText((positive ? "● " : "○ ") + text);
+        t.setTextSize(12f);
+        t.setTypeface(Ui.medium());
+        t.setTextColor(positive ? Ui.ON_PRIMARY_CONTAINER : Ui.ON_SURFACE_VARIANT);
+        t.setBackground(Ui.rounded(positive ? Ui.PRIMARY_CONTAINER : 0xFFF1EDE6, 999, this));
+        t.setPadding(Ui.dp(this, 10), Ui.dp(this, 5), Ui.dp(this, 10), Ui.dp(this, 5));
+        t.setIncludeFontPadding(false);
+        return t;
     }
 
     /** 统一的文本弹窗（把长说明从页面上挪走，保持界面清爽）。 */
