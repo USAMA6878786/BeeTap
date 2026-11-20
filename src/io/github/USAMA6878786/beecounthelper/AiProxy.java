@@ -304,7 +304,20 @@ final class AiProxy {
                 Logx.i("[ai-proxy] 上游 " + code + " 用时 " + (System.currentTimeMillis() - t0)
                         + "ms" + (attempt > 0 ? "（第 " + (attempt + 1) + " 次尝试）" : ""));
 
-                if (code == 200 || (code >= 400 && code < 500 && code != 429)) {
+                // 哪些响应值得重试：
+                //   429 / 5xx           —— 限流与上游故障
+                //   400 + "read request body error"（智谱 1210）
+                //                       —— 上游**读请求体失败**，属于瞬时故障（实测 2026-11-20：
+                //                          697KB 的请求体被上游半路读断，重发同样的包就好了）。
+                //                          不重试的话，用户看到的就是一条「识别失败」。
+                //   其余 4xx（key 错、模型不存在、额度用尽）重试无意义，直接回。
+                boolean retriable = code == 429 || code >= 500;
+                if (!retriable && code == 400 && looksLikeBodyReadError(resp)) {
+                    retriable = true;
+                    Logx.w("[ai-proxy] 上游 400 是「读请求体失败」（瞬时），按可重试处理");
+                }
+
+                if (!retriable) {
                     Result r = new Result();
                     r.code = code;
                     r.contentType = c.getContentType() == null
@@ -312,23 +325,18 @@ final class AiProxy {
                     r.body = resp;
                     return r;
                 }
-                if (code == 429 || code >= 500) {
-                    if (attempt < RETRY_DELAYS.length) {
-                        Logx.w("[ai-proxy] 上游 " + code + "，退避 " + RETRY_DELAYS[attempt] + "ms 重试");
-                        sleep(RETRY_DELAYS[attempt]);
-                        continue;
-                    }
+                if (attempt < RETRY_DELAYS.length) {
+                    Logx.w("[ai-proxy] 上游 " + code + "，退避 " + RETRY_DELAYS[attempt] + "ms 重试");
+                    sleep(RETRY_DELAYS[attempt]);
+                    continue;
+                }
+                {
                     Result r = new Result();
                     r.code = code;
                     r.contentType = "application/json";
                     r.body = resp;
                     return r;
                 }
-                Result r = new Result();
-                r.code = code;
-                r.contentType = "application/json";
-                r.body = resp;
-                return r;
             } catch (Throwable e) {
                 Logx.w("[ai-proxy] 转发失败（第 " + (attempt + 1) + " 次）："
                         + e.getClass().getSimpleName() + " " + e.getMessage());
@@ -345,6 +353,19 @@ final class AiProxy {
             }
         }
         return null;
+    }
+
+    /** 上游回的是不是"读请求体失败"（智谱 1210）——这种 400 是瞬时的，值得重发。 */
+    private static boolean looksLikeBodyReadError(byte[] resp) {
+        if (resp == null || resp.length == 0) {
+            return false;
+        }
+        try {
+            String s = new String(resp, "UTF-8").toLowerCase(Locale.US);
+            return s.contains("read request body error") || s.contains("1210");
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     // ---------------------------------------------------------------- 缓存
