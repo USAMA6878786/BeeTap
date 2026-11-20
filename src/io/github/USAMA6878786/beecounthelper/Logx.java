@@ -30,8 +30,17 @@ import java.util.Locale;
  */
 public final class Logx {
 
-    /** 单文件上限，超过就截断重来，避免无限增长。 */
-    private static final long MAX_BYTES = 512L * 1024L;
+    /**
+     * 单文件上限，超过就**轮转**（改名成 {@code .1}）而不是删掉。
+     *
+     * <p><b>为什么从 512KB 提到 2MB 且不再删除</b>（2026-11-20 实测）：压测时 su/broadcast
+     * 日志涨得飞快，512KB 一满就把整个文件删掉重来 —— 结果一次「识别失败」的现场被整段吃掉，
+     * 事后完全无法定位。失败现场只有一次，删了就永远没有了。多占 2MB 换"能查"很值。
+     */
+    private static final long MAX_BYTES = 2L * 1024L * 1024L;
+
+    /** 轮转后保留的备份份数（只留上一份，再老的丢掉）。 */
+    private static final int KEEP_BACKUPS = 1;
 
     /**
      * 运行期每写这么多字节才去 stat 一次文件大小。
@@ -94,8 +103,9 @@ public final class Logx {
                 Log.w(Const.TAG, "[log] mkdirs failed: " + parent.getAbsolutePath());
                 return false;
             }
-            if (f.exists() && f.length() > MAX_BYTES && !f.delete()) {
-                Log.w(Const.TAG, "[log] truncate failed: " + path);
+            if (f.exists() && f.length() > MAX_BYTES) {
+                // 启动时发现上次写爆了：轮转保留（不删），现场别丢。
+                maybeRotate(path);
             }
             if (!f.exists() && !f.createNewFile()) {
                 Log.w(Const.TAG, "[log] createNewFile failed: " + path);
@@ -198,13 +208,34 @@ public final class Logx {
         }
     }
 
-    /** 文件涨过上限就删掉重来（下一次 open 会新建）。运行期调用，不需要精确。 */
+    /** 文件涨过上限就轮转：当前文件改名为 {@code .1}，再新建空的继续写。运行期调用，不需要精确。 */
     private static void maybeRotate(String path) {
         try {
             File f = new File(path);
-            if (f.length() > MAX_BYTES && f.delete()) {
-                Log.i(Const.TAG, "[log] rotated: file exceeded " + MAX_BYTES + " bytes");
+            if (f.length() <= MAX_BYTES) {
+                return;
             }
+            // 旧的 .1 先清掉（只保留 KEEP_BACKUPS 份），再把自己改名成 .1。
+            for (int i = KEEP_BACKUPS; i >= 2; i--) {
+                File older = new File(path + "." + i);
+                if (older.exists()) {
+                    older.delete();
+                }
+            }
+            File bak = new File(path + ".1");
+            if (bak.exists() && !bak.delete()) {
+                Log.w(Const.TAG, "[log] rotate: 删不掉旧备份 " + bak.getAbsolutePath());
+            }
+            if (!f.renameTo(bak)) {
+                // 改名失败（跨挂载点等罕见情况）就退回老办法：截断重来，至少不让文件无限涨。
+                Log.w(Const.TAG, "[log] rotate: rename 失败，退回截断");
+                if (!f.delete()) {
+                    Log.w(Const.TAG, "[log] rotate: 截断也失败 " + path);
+                }
+                return;
+            }
+            Log.i(Const.TAG, "[log] rotated -> " + bak.getName()
+                    + "（" + (bak.length() / 1024) + "KB，上限 " + (MAX_BYTES / 1024) + "KB）");
         } catch (Throwable ignored) {
         }
     }
