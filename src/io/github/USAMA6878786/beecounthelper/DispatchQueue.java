@@ -140,6 +140,14 @@ final class DispatchQueue {
                         + RootShell.baseName(path));
                 return;
             }
+            // 文件没了就说明这张已经处理完被删掉了（回执可能在广播里丢了）。
+            // 继续补发只会让宿主拿着旧路径空等 3 秒 → 弹一条「识别失败」。
+            // 至少发过 2 次再判，避免"刚截图文件还没落盘"被误判。
+            if (n >= 2 && !new java.io.File(path).exists()) {
+                Logx.i("[dispatch-q] 文件已消失，判定处理完成，停止补发："
+                        + RootShell.baseName(path));
+                return;
+            }
             n++;
             // 每 5 次走一次 root 广播（能穿冻结），其余走普通广播（便宜）
             if (n % 5 == 1) {

@@ -611,6 +611,17 @@ final class HostHeadlessEngine {
             pendingPath = null;
             return;
         }
+        // 重复派发兜底：文件已经不在了就别再交给 Dart。
+        // 典型场景：这张图已经识别完、被删了，而模块侧的补发广播又到了（回执丢了、
+        // 或引擎重启后 DISPATCHED_HISTORY 清空）。以前会照常调用 onScreenshotDetected，
+        // 于是 Dart 那边死等 3 秒、抛「截图文件等待超时」，用户看到一条「识别失败」。
+        // 实测 2026-11-20 压测里这种等待超时出现 38 次。
+        if (!new java.io.File(path).exists()) {
+            Logx.i("[headless] 文件已不存在，忽略这次派发（多半是已处理并删除）："
+                    + RootShell.baseName(path));
+            pendingPath = null;
+            return;
+        }
         final String dispatchPath = path;
         lastDispatched = path;
         synchronized (DISPATCHED_HISTORY) {
