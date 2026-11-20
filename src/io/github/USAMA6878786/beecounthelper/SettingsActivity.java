@@ -172,7 +172,7 @@ public class SettingsActivity extends Activity {
         // 接管 AI 识别：模块在本地架代理，代替蜜蜂记账去访问 AI。
         // 关掉就停掉代理 —— 宿主侧的钩子只探测端口通不通，探测不到就回到直连（旧行为）。
         Ui.switchRow(this, behaviorCard, "接管 AI 识别",
-                "由 BeeTap 代发请求",
+                "由 BeeTap 代发请求，避免识别失败",
                 Prefs.aiTakeover(this), new Ui.OnToggle() {
                     @Override
                     public void onToggle(boolean on) {
