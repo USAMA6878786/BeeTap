@@ -163,8 +163,8 @@ final class UpdateCheck {
             }
             String apk = pick(body, "\"browser_download_url\"\\s*:\\s*\"([^\"]+\\.apk)\"");
             String page = pick(body, "\"html_url\"\\s*:\\s*\"(https://github\\.com/[^\"]+/releases/tag/[^\"]+)\"");
-            String version = normalize(tag);
-            Logx.i("[update] API: tag=" + tag + " apk=" + apk);
+            String version = normalizeVersion(tag);
+            Logx.i("[update] API: tag=" + tag + " -> " + version + " apk=" + apk);
             return new Info(true, version, apk, page, null, "api");
         } catch (Throwable t) {
             return new Info(false, null, null, null, shortMsg(t), "api");
@@ -245,6 +245,22 @@ final class UpdateCheck {
         } catch (Throwable t) {
             return url;
         }
+    }
+
+    /**
+     * 版本号归一：既要去掉 {@code v} 前缀，也要处理 LSP 模块仓库的 tag 约定。
+     *
+     * <p>Xposed-Modules-Repo 的 release tag 是 {@code <versionCode>-<versionName>}
+     * （例如 {@code 110-4.0}），直接拿去比较会得到"110 > 4 → 有新版本"的假警报。
+     * 这里取最后一个 {@code -} 之后的部分。
+     */
+    private static String normalizeVersion(String tag) {
+        String s = normalize(tag);
+        int dash = s.lastIndexOf('-');
+        if (dash > 0 && dash < s.length() - 1) {
+            return s.substring(dash + 1).trim();
+        }
+        return s;
     }
 
     /** {@code v2.73} → {@code 2.73}。 */
