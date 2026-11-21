@@ -113,6 +113,7 @@ public class BeeShotModule extends XposedModule {
 
             installFlutterChannelGate(cl);
             installMediaObserverGate(cl);
+            installProcessedListGuard(cl);
             installApplicationContextHook(cl, param);
             installActivityContextHook(cl);
             installActivityLifecycleProbe(cl);
@@ -159,6 +160,107 @@ public class BeeShotModule extends XposedModule {
      * <p>只挂一个重载。两参版内部会调用三参版，如果两个都挂，已被消费掉窗口的这一次
      * 会在第二道闸门上被自己拦掉，等于放行失败。
      */
+    /** 蜜蜂记账"已处理截图列表"在 SharedPreferences 里的键。 */
+    private static final String KEY_PROCESSED_LIST = "flutter.processed_screenshots";
+
+    /**
+     * 拦住"已处理截图列表"的写入，把我们自己的图剔掉。
+     *
+     * <p><b>为什么必须在这一层</b>（2026-11-21 实测）：蜜蜂记账的截屏检测在 **Dart** 层，
+     * 流程是「先把新图记进 processed_screenshots → 再交给业务层」；业务层一看路径已在列表里，
+     * 1ms 就返回 —— 既不记账也不报错。在 Java 层挡 ContentObserver 完全没用（它走
+     * method channel），实测挡完仍然出现 6 次「防抖跳过」、0 笔入账。
+     *
+     * <p>但 Dart 最终要通过 SharedPreferences 落盘，所以在 {@code EditorImpl.putString}
+     * 这个唯一入口把我们的路径过滤掉：列表里永远不会有我们的图，业务层就不会提前返回。
+     */
+    private void installProcessedListGuard(ClassLoader cl) {
+        try {
+            Class<?> impl = Class.forName("android.app.SharedPreferencesImpl", false, cl);
+            Class<?> editor = null;
+            Class<?>[] inners = impl.getDeclaredClasses();
+            for (int i = 0; i < inners.length; i++) {
+                if ("EditorImpl".equals(inners[i].getSimpleName())) {
+                    editor = inners[i];
+                    break;
+                }
+            }
+            if (editor == null) {
+                Logx.w("[gate-prefs] 找不到 EditorImpl，跳过");
+                return;
+            }
+            final Method putString = editor.getDeclaredMethod("putString",
+                    String.class, String.class);
+            boolean ok = add("gate-processed-list", putString, new XposedInterface.Hooker() {
+                @Override
+                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                    Object[] args = chain.getArgs().toArray();
+                    if (args.length == 2 && args[0] instanceof String && args[1] instanceof String) {
+                        String key = (String) args[0];
+                        String val = (String) args[1];
+                        if (KEY_PROCESSED_LIST.equals(key) && containsOwnPath(val)) {
+                            String filtered = filterOwnPaths(val);
+                            int n = ++ownFiltered;
+                            HostTelemetry.bump("processed_list_filtered");
+                            if (n <= 3 || n % 20 == 0) {
+                                Logx.i("[gate-prefs] 写入前剔掉自己的路径 (#" + n + ")");
+                            }
+                            return chain.proceed(new Object[]{key, filtered});
+                        }
+                    }
+                    return chain.proceed();
+                }
+            });
+            if (ok) {
+                Logx.i("[hook] 已处理列表写入闸门已挂");
+            } else {
+                Logx.w("[hook] 已处理列表写入闸门挂载失败");
+            }
+        } catch (Throwable t) {
+            Logx.w("[gate-prefs] 安装失败：" + t.getMessage());
+        }
+    }
+
+    /** 被过滤的次数（日志限流用）。 */
+    private volatile int ownFiltered = 0;
+
+    private static boolean containsOwnPath(String v) {
+        if (v == null) {
+            return false;
+        }
+        String l = v.toLowerCase();
+        return l.contains("beehelper") || l.contains("beetap");
+    }
+
+    /**
+     * 从 {@code 前缀 + ["路径", ...]} 里剔掉我们自己的路径，其余原样保留。
+     * 值的前面有一段固定前缀（非 JSON），所以只替换第一个 {@code [} 之后的部分。
+     */
+    private static String filterOwnPaths(String val) {
+        int start = val.indexOf('[');
+        if (start < 0) {
+            return val;
+        }
+        String prefix = val.substring(0, start);
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"([^\"]*)\"")
+                .matcher(val.substring(start));
+        StringBuilder sb = new StringBuilder("[");
+        int kept = 0;
+        while (m.find()) {
+            String p = m.group(1);
+            String lp = p.toLowerCase();
+            if (lp.contains("beehelper") || lp.contains("beetap")) {
+                continue;
+            }
+            if (kept++ > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(p).append('"');
+        }
+        return prefix + sb.append(']').toString();
+    }
+
     private void installFlutterChannelGate(ClassLoader cl) {
         Method twoArg = null;
         Method threeArg = null;
