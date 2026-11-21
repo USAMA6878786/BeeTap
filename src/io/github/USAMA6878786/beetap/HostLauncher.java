@@ -259,6 +259,9 @@ final class HostLauncher {
      */
     private static final int ALIGN_TICKS = 10;
 
+    /** 循环里学到的实际周期（RTT 闭环微调后），进程内缓存。 */
+    private static volatile long adaptivePeriodMs = 0L;
+
     /** 只有一条对齐循环（连点时复用，避免两条相位互踩）。 */
     private static volatile boolean thawLoopRunning = false;
 
@@ -290,18 +293,42 @@ final class HostLauncher {
         }
         thawLoopRunning = true;
         String uri = "content://" + pkg + ".androidx-startup/";
-        // timeout 兜底：即使某次 content 卡住，也不会留下永久循环。
-        // 目标周期 = 本机冻结间隔 + 150ms（略大于冻结间隔，让每轮的戳落在"上一次冻结之后"，
-        // 尽快解冻；周期越接近冻结间隔，戳越可能命中冻结态）。
-        // 循环内每轮实测本次戳耗时 d，用 T−d 当 sleep，让周期恒定、抖动被吸收。
-        final long target = freezeIntervalMs + 150L;
-        String cmd = "timeout " + (ALIGN_TICKS * 5) + " sh -c 'for i in $(seq 1 "
-                + ALIGN_TICKS + "); do "
-                + "a=$(date +%s%3N); "
-                + "content query --uri " + uri + " >/dev/null 2>&1; "
-                + "b=$(date +%s%3N); d=$((b-a)); sl=$(( " + target + " - d )); "
-                + "[ $sl -lt 500 ] && sl=500; "
-                + "sleep $((sl/1000)).$(printf %03d $((sl%1000))); "
+        // 周期学习值落在这个文件里（root 可写），下次开循环直接接着用。
+        String periodFile = ctx.getCacheDir().getAbsolutePath() + "/bee_period_ms";
+        // 上限 = 测到的冻结间隔：周期一旦超过它，每拍必然多漂一点，越长越差（实测 5350 → 393ms 延迟）。
+        long cap = Math.max(1_200L, freezeIntervalMs);
+        long seed = adaptivePeriodMs > 0L ? adaptivePeriodMs : cap;
+
+        // ---- 时间基准：/proc/uptime（单调），不用 date（会被校时跳变） ----
+        // 纯 shell 取毫秒：uptime 小数位是 10ms 精度，f*10 补成毫秒。
+        // 循环用"绝对时间轴"：dl 每次 += T，而不是"睡 T - 本次耗时"，
+        // 这样每拍的 shell/sleep 开销不会累积成漂移。
+        String cmd = "timeout " + (ALIGN_TICKS * 6) + " sh -c '"
+                // um: 用 read 拆 /proc/uptime，避免在单引号脚本里塞双引号
+                + "um() { read U _ < /proc/uptime; s=${U%.*}; f=${U#*.}; "
+                + "case $f in ?) f=${f}0;; ???*) f=${f%?};; esac; echo $(( s*1000 + f*10 )); }; "
+                + "PF=" + periodFile + "; T=" + seed + "; CAP=" + cap + "; "
+                + "[ -r $PF ] && { r=$(cat $PF); [ $r -gt 1000 ] 2>/dev/null && T=$r; }; "
+                + "[ $T -gt $CAP ] && T=$CAP; [ $T -lt 1200 ] && T=1200; "
+                // dl 先等于"现在"：第一拍立刻戳（连点开始时不能先等一个周期）
+                + "dl=$(um); i=0; "
+                + "while [ $i -lt " + ALIGN_TICKS + " ]; do i=$((i+1)); "
+                // 睡到绝对截止时刻；单次 sleep 有 ~40ms 开销，所以留 60ms 余量再补睡
+                + "while :; do now=$(um); rem=$(( dl - now )); [ $rem -le 20 ] && break; "
+                + "if [ $rem -gt 140 ]; then sl=$(( rem - 60 )); else sl=$rem; fi; "
+                + "sleep $(( sl/1000 )).$(printf %03d $(( sl%1000 ))); done; "
+                // 迟到判定必须放在 poke **之前**：poke 本身要 1 秒（解冻），
+                // 放在后面会把"正常的解冻耗时"误判成迟到，每拍都重置相位。
+                + "now=$(um); [ $(( now - dl )) -gt $(( T / 2 )) ] && dl=$now; "
+                + "a=$(um); content query --uri " + uri + " >/dev/null 2>&1; b=$(um); d=$(( b-a )); "
+                // RTT 反馈：<120ms 说明戳到的是醒着的进程（戳早了），可以放宽周期；
+                // 反向不修正 —— 戳晚时 RTT 也大，单靠它分不出"刚到点"和"晚了 3 秒"，
+                // 所以只做单向放宽，上限由 CAP（实测冻结间隔）兜住。
+                + "if [ $d -lt 120 ] && [ $T -lt $CAP ]; then T=$(( T + 20 )); fi; "
+                + "[ $T -gt $CAP ] && T=$CAP; [ $T -lt 1200 ] && T=1200; "
+                + "echo $T > $PF; "
+                // 下一拍的绝对截止时刻：加的是周期本身，不是"本拍实际耗时"，所以误差不累积
+                + "dl=$(( dl + T )); "
                 + "done'";
         final Process p = RootShell.startAsync(cmd);
         new Thread(new Runnable() {
