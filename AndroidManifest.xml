@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.github.USAMA6878786.beecounthelper">
+    package="io.github.USAMA6878786.beetap">
 
     <!--
         版本号不要写在这里。
@@ -124,8 +124,8 @@
             android:label="@string/widget_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="io.github.USAMA6878786.beecounthelper.WIDGET_REFRESH" />
-                <action android:name="io.github.USAMA6878786.beecounthelper.WIDGET_PING" />
+                <action android:name="io.github.USAMA6878786.beetap.WIDGET_REFRESH" />
+                <action android:name="io.github.USAMA6878786.beetap.WIDGET_PING" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

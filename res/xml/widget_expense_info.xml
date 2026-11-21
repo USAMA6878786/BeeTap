@@ -17,4 +17,4 @@
     android:widgetCategory="home_screen"
     android:widgetFeatures="reconfigurable"
     android:updatePeriodMillis="1800000"
-    android:configure="io.github.USAMA6878786.beecounthelper.WidgetConfigActivity" />
+    android:configure="io.github.USAMA6878786.beetap.WidgetConfigActivity" />

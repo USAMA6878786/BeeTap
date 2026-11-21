@@ -2,6 +2,12 @@
 
 ## v4.0
 
+### 包名更名（破坏性变更）
+- 应用 ID 由 `io.github.USAMA6878786.beecounthelper` 改为 **`io.github.USAMA6878786.beetap`**，
+  符合 LSPosed 模块仓库规范（无自有域名时用 `io.github.{用户名}.{模块名}`）
+- 因为包名变了，这是一个**全新应用**：旧版需要卸载，LSPosed 作用域、root 授权、磁贴、
+  桌面小组件都要重新配置；设置项也会回到默认值
+
 ### 核心：模块接管「截图记账」里的 AI 交互
 - 之前 AI 请求由蜜蜂记账进程发起，识别要 6~10 秒；这期间它被系统冻结，远程连接被掐断 →
   「识别失败」。
@@ -66,7 +72,7 @@
 
 ## v3.1
 
-- 包名改为 `io.github.USAMA6878786.beecounthelper`（符合 LSPosed 官方仓库要求）
+- 包名改为 `io.github.USAMA6878786.beetap`（符合 LSPosed 官方仓库要求）
 - 仓库迁移到 USAMA6878786/BeeCountHelper
 - 修正「检查更新」与「项目主页」地址
 - 清理走不通的「注入前台服务」实验代码；修正 binder 解冻相关注释
