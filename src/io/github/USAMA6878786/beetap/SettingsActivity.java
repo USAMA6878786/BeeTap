@@ -609,7 +609,7 @@ public class SettingsActivity extends Activity {
             b.setNeutralButton("打开发布页", new android.content.DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(android.content.DialogInterface d, int which) {
-                    openUrl("https://github.com/USAMA6878786/BeeCountHelper/releases");
+                    openUrl("https://github.com/USAMA6878786/BeeTap/releases");
                 }
             });
             b.show();

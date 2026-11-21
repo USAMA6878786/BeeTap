@@ -8,4 +8,4 @@ minApiVersion=101
 targetApiVersion=102
 staticScope=false
 autoHotReload=false
-updateJson=https://raw.githubusercontent.com/USAMA6878786/BeeCountHelper/main/update.json
+updateJson=https://raw.githubusercontent.com/USAMA6878786/BeeTap/main/update.json

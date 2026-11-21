@@ -29,7 +29,7 @@ final class UpdateCheck {
 
     /** 权威来源：仓库里的 update.json（随版本一起提交，LSPosed 也读它）。 */
     private static final String API =
-            "https://api.github.com/repos/USAMA6878786/BeeCountHelper/releases/latest";
+            "https://api.github.com/repos/USAMA6878786/BeeTap/releases/latest";
 
     /**
      * update.json 的候选地址，按顺序试。
@@ -40,8 +40,8 @@ final class UpdateCheck {
      * jsDelivr 的 CDN 在国内一般可达，内容相同（同一仓库同一分支）。
      */
     private static final String[] JSON_URLS = {
-            "https://raw.githubusercontent.com/USAMA6878786/BeeCountHelper/main/update.json",
-            "https://cdn.jsdelivr.net/gh/USAMA6878786/BeeCountHelper@main/update.json",
+            "https://raw.githubusercontent.com/USAMA6878786/BeeTap/main/update.json",
+            "https://cdn.jsdelivr.net/gh/USAMA6878786/BeeTap@main/update.json",
     };
 
     /**

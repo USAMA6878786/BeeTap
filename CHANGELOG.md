@@ -73,7 +73,7 @@
 ## v3.1
 
 - 包名改为 `io.github.USAMA6878786.beetap`（符合 LSPosed 官方仓库要求）
-- 仓库迁移到 USAMA6878786/BeeCountHelper
+- 仓库迁移到 USAMA6878786/BeeTap
 - 修正「检查更新」与「项目主页」地址
 - 清理走不通的「注入前台服务」实验代码；修正 binder 解冻相关注释
 
