@@ -144,6 +144,15 @@ final class HostLauncher {
     /** 校准结果缓存键（避免每次启动都重新测）。 */
     private static final String PREF_ALIGN_INTERVAL = "align_interval_ms";
 
+    /**
+     * 是否真的测到过本机冻结间隔。
+     *
+     * <p>只有 MIUI/HyperOS 会打 {@code GreezeManager} 的 FZ/THAW 日志；换到别的 ROM
+     * 校准时必然失败。失败时**不能**继续用 5010 这个 HyperOS 的值当"合适"——
+     * 万一那台机器每 2 秒就冻一次，5.1 秒的周期会让宿主一直半冻着。
+     */
+    private static volatile boolean intervalKnown = false;
+
     /** 本机实测的「解冻→再冻结」间隔；默认 5010 是这台 HyperOS 机器的值。 */
     private static volatile long freezeIntervalMs = 5_010L;
 
@@ -176,6 +185,7 @@ final class HostLauncher {
                             .getLong(PREF_ALIGN_INTERVAL, 0L);
                     if (cached > 1_000L) {
                         freezeIntervalMs = cached;
+                        intervalKnown = true;
                         Logx.i("[launch] 用缓存的冻结间隔=" + cached + "ms");
                         return;
                     }
@@ -200,6 +210,7 @@ final class HostLauncher {
                     // 只记"本机冻结间隔"；每次戳的耗时抖动由循环内**闭环自校正**吸收
                     // （每轮用 目标周期 − 本次耗时 当 sleep，周期恒定）。
                     freezeIntervalMs = interval;
+                    intervalKnown = true;
                     app.getSharedPreferences("beeshot", 0).edit()
                             .putLong(PREF_ALIGN_INTERVAL, interval).apply();
                     Logx.i("[launch] 自适应校准完成：本机冻结间隔=" + interval
@@ -294,14 +305,24 @@ final class HostLauncher {
         // 目标周期 = 本机冻结间隔 + 150ms（略大于冻结间隔，让每轮的戳落在"上一次冻结之后"，
         // 尽快解冻；周期越接近冻结间隔，戳越可能命中冻结态）。
         // 循环内每轮实测本次戳耗时 d，用 T−d 当 sleep，让周期恒定、抖动被吸收。
-        final long target = freezeIntervalMs + 150L;
-        String cmd = "timeout " + (ALIGN_TICKS * 5) + " sh -c 'for i in $(seq 1 "
-                + ALIGN_TICKS + "); do "
+        // 已知本机间隔：+150 让周期落在冻结间隔**右侧**（滞后恒定、不累积）。
+        // 未知（非 MIUI，校不准）：用更短的 3000ms —— 未知情况下"戳早了"只是多一次
+        // 几十毫秒的查询，代价极小；而"戳晚了"会让宿主整段冻住，代价大得多。
+        final long target = intervalKnown ? freezeIntervalMs + 150L : 3_000L;
+        Logx.i("[launch] 解冻周期=" + target + "ms（"
+                + (intervalKnown ? "已校准 " + freezeIntervalMs + "ms" : "未校准，用保守值") + "）");
+        // 队列忙闲标记（DispatchQueue 写、这里读）：整体空闲就提前收工，别空跑满 10 拍。
+        final String busyFile = ctx.getCacheDir().getAbsolutePath() + "/bee_busy";
+        String cmd = "timeout " + (ALIGN_TICKS * 5) + " sh -c '"
+                + "idle=0; for i in $(seq 1 " + ALIGN_TICKS + "); do "
                 + "a=$(date +%s%3N); "
                 + "content query --uri " + uri + " >/dev/null 2>&1; "
                 + "b=$(date +%s%3N); d=$((b-a)); sl=$(( " + target + " - d )); "
-                + "[ $sl -lt 500 ] && sl=500; "
-                + "sleep $((sl/1000)).$(printf %03d $((sl%1000))); "
+                + "[ $sl -lt 500 ] && sl=500; sleep $((sl/1000)).$(printf %03d $((sl%1000))); "
+                // 队列已空：连续两拍确认才算数（避开刚点下去、截图还没入队的那一两秒）
+                + "if [ \"$(cat " + busyFile + " 2>/dev/null)\" = \"0\" ]; then idle=$((idle+1)); else idle=0; fi; "
+                // 前 4 拍（≈20 秒）不退出：给截图、派发、首张识别留足时间
+                + "[ $i -ge 4 ] && [ $idle -ge 2 ] && break; "
                 + "done'";
         final Process p = RootShell.startAsync(cmd);
         new Thread(new Runnable() {

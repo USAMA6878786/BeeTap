@@ -79,6 +79,7 @@ final class DispatchQueue {
                 Logx.w("[dispatch-q] 队列满，丢掉最早的一张：" + RootShell.baseName(dropped));
             }
             QUEUE.addLast(path);
+            markBusy(app, true);
             Logx.i("[dispatch-q] 入队（队列 " + QUEUE.size() + "）："
                     + RootShell.baseName(path));
             if (worker == null) {
@@ -94,6 +95,34 @@ final class DispatchQueue {
         }
     }
 
+    /**
+     * 把"队列是否还有活"写到 cache 里的一个小文件，给解冻循环看。
+     *
+     * <p>为什么用文件而不是进程内变量：解冻循环跑在 root shell 里（一次 su 循环、
+     * 不反复起进程），拿不到模块进程的内存。写一个字节最省事。
+     * 循环靠它决定"队列空了就提前收工"，避免空跑满 10 拍白耗电。
+     */
+    static void markBusy(Context app, boolean busy) {
+        if (app == null) {
+            return;
+        }
+        java.io.FileOutputStream os = null;
+        try {
+            java.io.File f = new java.io.File(app.getCacheDir(), "bee_busy");
+            os = new java.io.FileOutputStream(f, false);
+            os.write(busy ? '1' : '0');
+            os.flush();
+        } catch (Throwable ignored) {
+        } finally {
+            if (os != null) {
+                try {
+                    os.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
     /** 串行消化队列。队列空了就退出线程（下次 submit 会重建）。 */
     private static void drain(Context app) {
         while (true) {
@@ -102,6 +131,7 @@ final class DispatchQueue {
                 path = QUEUE.pollFirst();
                 if (path == null) {
                     worker = null;
+                    markBusy(app, false);
                     Logx.i("[dispatch-q] 队列已空，工人线程退出");
                     return;
                 }
